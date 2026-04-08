@@ -1,0 +1,24 @@
+{
+  "development": {
+    "username": "xiangzuguanjia",
+    "password": "xiangzuguanjia",
+    "database": "xiangzuguanjia",
+    "host": "120.27.221.222",
+    "dialect": "mysql",
+    "timezone": "+08:00"
+  },
+  "test": {
+    "username": "xiangzuguanjia",
+    "password": "xiangzuguanjia",
+    "database": "xiangzuguanjia",
+    "host": "120.27.221.222",
+    "dialect": "mysql"
+  },
+  "production": {
+    "username": "xiangzuguanjia",
+    "password": "xiangzuguanjia",
+    "database": "xiangzuguanjia",
+    "host": "120.27.221.222",
+    "dialect": "mysql"
+  }
+}
