@@ -1,0 +1,26 @@
+{
+  "name": "apartment-admin",
+  "version": "1.0.0",
+  "description": "公寓管理系统-管理端",
+  "main": "main.js",
+  "scripts": {
+    "dev:h5": "uni",
+    "build:h5": "uni build",
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:mp-weixin": "uni build -p mp-weixin"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.19"
+  },
+  "devDependencies": {
+    "@dcloudio/vite-plugin-uni": "latest",
+    "vite": "latest"
+  },
+  "keywords": [
+    "uni-app",
+    "apartment",
+    "management"
+  ],
+  "author": "",
+  "license": "MIT"
+}

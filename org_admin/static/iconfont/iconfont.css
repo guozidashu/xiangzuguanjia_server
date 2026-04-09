@@ -1,0 +1,11 @@
+@font-face {
+    font-family: "ali-icons";
+    font-weight: normal;
+    font-style: normal;
+    src: url('@/static/iconfont/iconfont.woff2') format('woff2');
+}
+
+.ali-icons {
+    font-family: "ali-icons";
+    font-style: normal;
+}

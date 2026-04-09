@@ -1,0 +1,426 @@
+{
+  "pages": [
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationBarTitleText": "登录",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "首页",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/lease/list",
+      "style": {
+        "navigationBarTitleText": "租约管理",
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/bill/list",
+      "style": {
+        "navigationBarTitleText": "账单管理",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/bill/lease-bills",
+      "style": {
+        "navigationBarTitleText": "租约账单",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/room/list",
+      "style": {
+        "navigationBarTitleText": "房间管理",
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/lease/create",
+      "style": {
+        "navigationBarTitleText": "创建租约"
+      }
+    },
+    {
+      "path": "pages/lease/detail",
+      "style": {
+        "navigationBarTitleText": "租约详情",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/lease/renew",
+      "style": {
+        "navigationBarTitleText": "续租"
+      }
+    },
+    {
+      "path": "pages/lease/change-room",
+      "style": {
+        "navigationBarTitleText": "换房"
+      }
+    },
+    {
+      "path": "pages/lease/modify",
+      "style": {
+        "navigationBarTitleText": "租约调整"
+      }
+    },
+    {
+      "path": "pages/lease/terminate",
+      "style": {
+        "navigationBarTitleText": "解约"
+      }
+    },
+    {
+      "path": "pages/lease/occupant-edit",
+      "style": {
+        "navigationBarTitleText": "同住人信息"
+      }
+    },
+    {
+      "path": "pages/lease/settlement-list",
+      "style": {
+        "navigationBarTitleText": "结算单列表",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/lease/settlement-detail",
+      "style": {
+        "navigationBarTitleText": "结算单详情",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/bill/detail",
+      "style": {
+        "navigationBarTitleText": "账单详情",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/bill/edit",
+      "style": {
+        "navigationBarTitleText": "编辑账单"
+      }
+    },
+    {
+      "path": "pages/bill/create-custom",
+      "style": {
+        "navigationBarTitleText": "创建账单"
+      }
+    },
+    {
+      "path": "pages/repair/list",
+      "style": {
+        "navigationBarTitleText": "报修管理",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/repair/detail",
+      "style": {
+        "navigationBarTitleText": "报修详情"
+      }
+    },
+    {
+      "path": "pages/repair/create",
+      "style": {
+        "navigationBarTitleText": "报修申请"
+      }
+    },
+    {
+      "path": "pages/repair/complete",
+      "style": {
+        "navigationBarTitleText": "完成维修"
+      }
+    },
+    {
+      "path": "pages/announcement/list",
+      "style": {
+        "navigationBarTitleText": "公告管理",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/announcement/edit",
+      "style": {
+        "navigationBarTitleText": "编辑公告"
+      }
+    },
+    {
+      "path": "pages/user/profile",
+      "style": {
+        "navigationBarTitleText": "个人中心"
+      }
+    },
+    {
+      "path": "pages/utility/reading",
+      "style": {
+        "navigationBarTitleText": "水电抄表"
+      }
+    },
+    {
+      "path": "pages/prepaid/list",
+      "style": {
+        "navigationBarTitleText": "预付费管理",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/prepaid/detail",
+      "style": {
+        "navigationBarTitleText": "预付费详情"
+      }
+    },
+    {
+      "path": "pages/room/detail",
+      "style": {
+        "navigationBarTitleText": "房间信息",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/room/room-bills",
+      "style": {
+        "navigationBarTitleText": "租户账单",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/room/edit",
+      "style": {
+        "navigationBarTitleText": "编辑房间"
+      }
+    },
+    {
+      "path": "pages/tenant/list",
+      "style": {
+        "navigationBarTitleText": "租户管理",
+        "navigationStyle": "custom",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/tenant/detail",
+      "style": {
+        "navigationBarTitleText": "租户详情"
+      }
+    },
+    {
+      "path": "pages/tenant/edit",
+      "style": {
+        "navigationBarTitleText": "编辑租户"
+      }
+    },
+    {
+      "path": "pages/device/add",
+      "style": {
+        "navigationBarTitleText": "添加设备"
+      }
+    },
+    {
+      "path": "pages/device/electric-record",
+      "style": {
+        "navigationBarTitleText": "用电记录"
+      }
+    },
+    {
+      "path": "pages/deposit/list",
+      "style": {
+        "navigationBarTitleText": "押金管理",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50
+      }
+    },
+    {
+      "path": "pages/deposit/lease-deposits",
+      "style": {
+        "navigationBarTitleText": "租约押金",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/deposit/create",
+      "style": {
+        "navigationBarTitleText": "创建押金"
+      }
+    },
+    {
+      "path": "pages/deposit/detail",
+      "style": {
+        "navigationBarTitleText": "押金详情"
+      }
+    },
+    {
+      "path": "pages/deposit/refund",
+      "style": {
+        "navigationBarTitleText": "押金退还"
+      }
+    },
+    {
+      "path": "pages/deposit/deduct",
+      "style": {
+        "navigationBarTitleText": "押金扣除"
+      }
+    },
+    {
+      "path": "pages/deposit/receive",
+      "style": {
+        "navigationBarTitleText": "收取押金"
+      }
+    },
+    {
+      "path": "pages/bill/record-payment",
+      "style": {
+        "navigationBarTitleText": "录入支付"
+      }
+    },
+    {
+      "path": "pages/bill/modify-amount",
+      "style": {
+        "navigationBarTitleText": "修改金额"
+      }
+    },
+    {
+      "path": "pages/bill/modify-notes",
+      "style": {
+        "navigationBarTitleText": "修改备注"
+      }
+    },
+    {
+      "path": "pages/bill/split",
+      "style": {
+        "navigationBarTitleText": "拆分账单"
+      }
+    },
+    {
+      "path": "pages/bill/void",
+      "style": {
+        "navigationBarTitleText": "作废账单"
+      }
+    },
+    {
+      "path": "pages/bill/reschedule",
+      "style": {
+        "navigationBarTitleText": "账单改期"
+      }
+    },
+    {
+      "path": "pages/bill/record-refund",
+      "style": {
+        "navigationBarTitleText": "录入退款"
+      }
+    },
+    {
+      "path": "pages/permission/list",
+      "style": {
+        "navigationBarTitleText": "项目成员管理",
+        "enablePullDownRefresh": true,
+        "onReachBottomDistance": 50,
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/permission/edit",
+      "style": {
+        "navigationBarTitleText": "权限配置",
+        "navigationBarBackgroundColor": "#0050B3",
+        "navigationBarTextStyle": "white"
+      }
+    },
+    {
+      "path": "pages/batch/index",
+      "style": {
+        "navigationBarTitleText": "批量操作"
+      }
+    },
+    {
+      "path": "pages/bill/electricity-batch",
+      "style": {
+        "navigationBarTitleText": "生成电费账单"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "公寓管理系统",
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "backgroundColor": "#F5F5F5"
+  },
+  "tabBar": {
+    "color": "#8a8a8a",
+    "selectedColor": "#000000",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "iconPath": "static/tab_icons/def/shouye-zhihui.png",
+        "selectedIconPath": "static/tab_icons/act/shouye-zhihui.png",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/room/list",
+        "iconPath": "static/tab_icons/def/zaixianxuanfang.png",
+        "selectedIconPath": "static/tab_icons/act/zaixianxuanfang.png",
+        "text": "房源"
+      },
+      {
+        "pagePath": "pages/lease/list",
+        "iconPath": "static/tab_icons/def/qianshuxieyi.png",
+        "selectedIconPath": "static/tab_icons/act/qianshuxieyi.png",
+        "text": "租约"
+      },
+      {
+        "pagePath": "pages/tenant/list",
+        "iconPath": "static/tab_icons/def/gerenzhongxin-zhihui.png",
+        "selectedIconPath": "static/tab_icons/act/gerenzhongxin-zhihui.png",
+        "text": "租户"
+      }
+    ]
+  },
+  "easycom": {
+    "autoscan": true,
+    "custom": {
+      "^xy-(.*)": "@/components/xy-$1.vue"
+    }
+  }
+}
