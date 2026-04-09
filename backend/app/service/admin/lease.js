@@ -26,29 +26,62 @@ class LeaseService extends Service {
         }, { transaction: t });
       }
 
-      // 2. 检查房间状态 (确保房间当前为空置 0 或 预定 2)
+      // 2. 检查房间状态
       const room = await ctx.model.Room.findOne({
         where: { id: lease_data.room_id, org_id },
         transaction: t,
       });
 
-      if (!room || ![ 0, 2 ].includes(room.status)) {
+      if (!room || ![0, 2].includes(room.status)) {
         ctx.throw(422, '房间当前状态不可签约');
       }
 
-      // 3. 创建租约记录
+      // 3. 计算初始状态
+      const dayjs = require('dayjs');
+      const start = dayjs(lease_data.start_date);
+      const is_future = start.isAfter(dayjs(), 'day');
+      const initial_status = is_future ? 0 : 1;
+
+      // 4. 创建租约主记录
       const lease = await ctx.model.Lease.create({
-        ...lease_data,
         org_id,
         tenant_id: tenant.id,
-        status: 1, // 直接设为生效中（实际业务可能先待签约）
+        room_id: lease_data.room_id,
+        manager_id: lease_data.manager_id,
+        start_date: lease_data.start_date,
+        end_date: lease_data.end_date,
+        status: initial_status,
       }, { transaction: t });
 
-      // 4. 更新房间状态为“已租 (1)”
+      // 5. 创建初始版本记录 (0: NEW)
+      const version = await ctx.model.LeaseVersion.create({
+        org_id,
+        lease_id: lease.id,
+        version_no: 1,
+        change_type: 0, 
+        room_id: lease_data.room_id,
+        rent_price: lease_data.rent_price,
+        deposit_amount: lease_data.deposit_amount || lease_data.rent_price, // 默认押一
+        payment_cycle: lease_data.payment_cycle || 1,
+        start_date: lease_data.start_date,
+        end_date: lease_data.end_date,
+        electric_price: lease_data.electric_price,
+        water_price: lease_data.water_price,
+        billing_type: lease_data.billing_type,
+        initial_electric_reading: lease_data.initial_electric_reading,
+        initial_water_reading: lease_data.initial_water_reading,
+        allowed_payment_ids: lease_data.allowed_payment_ids,
+        remark: lease_data.remark,
+      }, { transaction: t });
+
+      // 6. 关联版本回主表
+      await lease.update({ current_version_id: version.id }, { transaction: t });
+
+      // 7. 更新房间状态
       const old_status = room.status;
       await room.update({ status: 1 }, { transaction: t });
 
-      // 5. 记录房态变动流转
+      // 8. 房态变动日志
       await ctx.model.RoomStatusLog.create({
         org_id,
         room_id: room.id,
@@ -60,10 +93,10 @@ class LeaseService extends Service {
         operator_id: ctx.state.user.uid,
       }, { transaction: t });
 
-      // 6. 自动化出账：生成首期账单与押金本
-      await ctx.service.admin.financial.createLeaseInitialLedger(lease, t);
+      // 9. 自动化出账：生成首期账单与押金本 (传递版本信息)
+      await ctx.service.admin.financial.createLeaseInitialLedger(lease, version, t);
 
-      return { tenant, lease };
+      return { tenant, lease, version };
     });
   }
 
@@ -72,42 +105,48 @@ class LeaseService extends Service {
    * @param {Number} old_lease_id - 原租约ID
    * @param {Object} new_lease_data - 新租约参数
    */
-  async renew(old_lease_id, new_lease_data) {
+  async renew(lease_id, new_version_data) {
     const { ctx } = this;
     const { org_id } = ctx;
 
     return await ctx.model.transaction(async t => {
-      const old_lease = await ctx.model.Lease.findOne({
-        where: { id: old_lease_id, org_id },
+      // 1. 获取原租约及其当前版本
+      const lease = await ctx.model.Lease.findOne({
+        where: { id: lease_id, org_id },
+        include: [{ model: ctx.model.LeaseVersion, as: 'current_version' }],
         transaction: t,
       });
 
-      if (!old_lease || old_lease.status !== 1) {
-        ctx.throw(422, '原租约状态异常，无法续租');
+      if (!lease || ![1, 4].includes(lease.status)) {
+        ctx.throw(422, '租约当前状态异常，无法续租');
       }
 
-      // 1. 创建新租约，关联前序 ID
-      const new_lease = await ctx.model.Lease.create({
-        ...new_lease_data,
+      const last_version = lease.current_version;
+      const next_version_no = (last_version ? last_version.version_no : 0) + 1;
+
+      // 2. 创建新版本记录 (RENEW)
+      const version = await ctx.model.LeaseVersion.create({
+        ...new_version_data,
         org_id,
-        tenant_id: old_lease.tenant_id,
-        room_id: old_lease.room_id,
-        previous_lease_id: old_lease.id,
-        change_type: 1, // 续租
-        status: 1,
+        lease_id: lease.id,
+        version_no: next_version_no,
+        change_type: 1, 
+        room_id: lease.room_id, // 续租默认不换房
       }, { transaction: t });
 
-      // 2. 将旧租约标记为“已结清/已续租过往状态 (可定义为状态 2 已到期或专门状态)”
-      // 这里暂时将其设为 2 已到期 (或根据业务逻辑决定是否立即失效)
-      await old_lease.update({ status: 2 }, { transaction: t });
+      // 3. 更新租约主表
+      await lease.update({
+        current_version_id: version.id,
+        end_date: version.end_date,
+        status: 1, // 确保状态为生效中
+      }, { transaction: t });
 
-      return new_lease;
+      // 4. (可选) 此处可调用财务服务生成新版本的后续账单，暂留空由具体业务触发
+      
+      return { lease, version };
     });
   }
 
-  /**
-   * 获取租约详情 (带关联数据)
-   */
   async detail(id) {
     const { ctx } = this;
     const lease = await ctx.model.Lease.findOne({
@@ -115,10 +154,13 @@ class LeaseService extends Service {
       include: [
         { model: ctx.model.Room, as: 'room', include: [{ model: ctx.model.Project, as: 'project' }] },
         { model: ctx.model.Tenant, as: 'tenant' },
-        { model: ctx.model.OrgStaff, as: 'manager', attributes: [ 'name', 'phone' ] },
+        { model: ctx.model.OrgStaff, as: 'manager', attributes: ['name', 'phone'] },
+        { model: ctx.model.LeaseVersion, as: 'versions' },
+        { model: ctx.model.LeaseVersion, as: 'current_version' },
         { model: ctx.model.LeaseCoTenant, as: 'co_tenants' },
         { model: ctx.model.LeaseDocument, as: 'documents' },
       ],
+      order: [[{ model: ctx.model.LeaseVersion, as: 'versions' }, 'version_no', 'DESC']],
     });
 
     if (!lease) {
@@ -134,16 +176,19 @@ class LeaseService extends Service {
    */
   async changeRoom(params) {
     const { ctx } = this;
-    const { old_lease_id, new_room_id, new_start_date, new_rent_price } = params;
+    const { old_lease_id, new_room_id, new_start_date, new_rent_price, transfer_fee = 0 } = params;
     const { org_id } = ctx;
 
     return await ctx.model.transaction(async t => {
       // 1. 获取原租约并校验
-      const old_lease = await ctx.model.Lease.findOne({
+      const lease = await ctx.model.Lease.findOne({
         where: { id: old_lease_id, org_id },
+        include: [{ model: ctx.model.LeaseVersion, as: 'current_version' }],
         transaction: t,
       });
-      if (!old_lease || old_lease.status !== 1) ctx.throw(422, '原租约不在生效状态，无法换房');
+      if (!lease || lease.status !== 1) ctx.throw(422, '原租约不在生效状态，无法换房');
+
+      const old_room_id = lease.room_id;
 
       // 2. 检查并锁定新房间
       const new_room = await ctx.model.Room.findOne({
@@ -153,34 +198,50 @@ class LeaseService extends Service {
       if (!new_room || new_room.status !== 0) ctx.throw(422, '新房间非空置状态');
 
       // 3. 释放原房间
-      await ctx.model.Room.update({ status: 0 }, { 
-        where: { id: old_lease.room_id }, 
-        transaction: t 
+      await ctx.model.Room.update({ status: 0 }, {
+        where: { id: old_room_id },
+        transaction: t
       });
 
       // 4. 占用新房间
       await new_room.update({ status: 1 }, { transaction: t });
 
-      // 5. 终止原合同 (状态标记为 3 已结清/已退租)
-      await old_lease.update({ status: 3, actual_end_date: new_start_date }, { transaction: t });
-
-      // 6. 创建新合同 (换房产生的合同)
-      const new_lease = await ctx.model.Lease.create({
+      // 5. 记录换房事件 (LeaseTransfer)
+      await ctx.model.LeaseTransfer.create({
         org_id,
-        tenant_id: old_lease.tenant_id,
-        room_id: new_room_id,
-        start_date: new_start_date,
-        end_date: old_lease.end_date, // 默认继承原到期日
-        rent_price: new_rent_price || old_lease.rent_price,
-        previous_lease_id: old_lease.id,
-        change_type: 2, // 换房
-        status: 1,
+        lease_id: lease.id,
+        from_room_id: old_room_id,
+        to_room_id: new_room_id,
+        transfer_date: new_start_date,
+        fee: transfer_fee,
       }, { transaction: t });
 
-      // 7. 同步生成新房的首期账单
-      await ctx.service.admin.financial.createLeaseInitialLedger(new_lease, t);
+      // 6. 创建新版本记录 (TRANSFER)
+      const last_version = lease.current_version;
+      const next_version_no = (last_version ? last_version.version_no : 0) + 1;
 
-      return new_lease;
+      const version = await ctx.model.LeaseVersion.create({
+        ...last_version.toJSON(), // 继承原版本属性
+        id: undefined, // 排除 ID
+        version_no: next_version_no,
+        change_type: 2, 
+        room_id: new_room_id,
+        start_date: new_start_date,
+        rent_price: new_rent_price || last_version.rent_price,
+        created_at: undefined,
+        updated_at: undefined,
+      }, { transaction: t });
+
+      // 7. 更新租约主表
+      await lease.update({
+        room_id: new_room_id,
+        current_version_id: version.id,
+      }, { transaction: t });
+
+      // 8. 同步生成新房的首期账单
+      await ctx.service.admin.financial.createLeaseInitialLedger(lease, version, t);
+
+      return { lease, version };
     });
   }
 
@@ -192,56 +253,62 @@ class LeaseService extends Service {
   async terminate(id, payload) {
     const { ctx } = this;
     const { org_id } = ctx;
-    const { 
-      actual_end_date = new Date(), 
-      checkout_type = 1, 
-      readings = {}, 
-      damage_amount = 0, 
-      penalty_amount = 0, 
-      remark 
+    const {
+      actual_end_date = new Date(),
+      checkout_type = 1,
+      readings = {},
+      damage_amount = 0,
+      penalty_amount = 0,
+      remark
     } = payload;
 
     return await ctx.model.transaction(async t => {
-      // 1. 获取核心数据
+      // 1. 获取核心数据及其当前版本
       const lease = await ctx.model.Lease.findOne({
         where: { id, org_id },
         transaction: t,
-        include: [{ model: ctx.model.Room, as: 'room' }],
+        include: [
+          { model: ctx.model.Room, as: 'room' },
+          { model: ctx.model.LeaseVersion, as: 'current_version' }
+        ],
       });
       if (!lease || lease.status !== 1) ctx.throw(422, '租约不可结算退租');
 
-      // 2. 财务汇总：已收押金
+      const version = lease.current_version;
+
+      // ... (财务汇总逻辑保持不变) ...
       const deposits = await ctx.model.LeaseDeposit.findAll({
         where: { lease_id: id, org_id },
         transaction: t,
       });
       const total_deposit_paid = deposits.reduce((sum, d) => sum + Number(d.amount_paid), 0);
 
-      // 3. 财务汇总：待缴欠费 (不含水电)
       const unpaid_bills = await ctx.model.Bill.findAll({
         where: { lease_id: id, status: 0, org_id },
         transaction: t,
       });
       const total_unpaid = unpaid_bills.reduce((sum, b) => sum + Number(b.amount_due), 0);
 
-      // 4. 水电附加清算 (如有读数)
+      // 4. 水电附加清算 (从当前版本获取初始读数和单价)
       let utility_cost = 0;
-      if (readings.electric !== undefined && lease.initial_electric_reading !== null) {
-        const diff = Number(readings.electric) - Number(lease.initial_electric_reading);
-        if (diff > 0) utility_cost += diff * (lease.electric_price || 0);
+      if (readings.electric !== undefined && version.initial_electric_reading !== null) {
+        const diff = Number(readings.electric) - Number(version.initial_electric_reading);
+        if (diff > 0) utility_cost += diff * (version.electric_price || 0);
       }
-      if (readings.water !== undefined && lease.initial_water_reading !== null) {
-        const diff = Number(readings.water) - Number(lease.initial_water_reading);
-        if (diff > 0) utility_cost += diff * (lease.water_price || 0);
+      if (readings.water !== undefined && version.initial_water_reading !== null) {
+        const diff = Number(readings.water) - Number(version.initial_water_reading);
+        if (diff > 0) utility_cost += diff * (version.water_price || 0);
       }
 
-      // 5. 计算最终退款金额 (应退 = 押金 - 欠费 - 水电 - 损扣 - 违约)
+      // 5. 计算最终退款金额
       const final_refund = total_deposit_paid - total_unpaid - utility_cost - Number(damage_amount) - Number(penalty_amount);
 
-      // 6. 创建结算明细单 (Checkout Record)
+      // 6. 创建结算明细单
       const checkout = await ctx.model.LeaseCheckout.create({
         org_id,
+        project_id: lease.room ? lease.room.project_id : 0,
         lease_id: id,
+        tenant_id: lease.tenant_id,
         checkout_type,
         checkout_date: actual_end_date,
         final_electric_reading: readings.electric,
@@ -251,18 +318,18 @@ class LeaseService extends Service {
         penalty_amount: penalty_amount,
         damage_amount: damage_amount,
         final_refund_amount: final_refund,
-        review_status: 1, // 直接生效
+        review_status: 1, 
         remark,
       }, { transaction: t });
 
-      // 7. 变更关联状态 (账单结清、押金退还)
+      // 7. 变更关联状态
       await ctx.model.Bill.update({ status: 3, remark: `已在退房结算[${checkout.id}]中抵扣` }, {
         where: { lease_id: id, status: 0, org_id },
         transaction: t,
       });
 
-      await ctx.model.LeaseDeposit.update({ 
-        status: 2, // 已清算退还
+      await ctx.model.LeaseDeposit.update({
+        status: 2, 
         amount_refunded: final_refund > 0 ? final_refund : 0,
         remark: `退房结算[${checkout.id}]`,
       }, {
@@ -270,15 +337,29 @@ class LeaseService extends Service {
         transaction: t,
       });
 
-      // 8. 房源与租约状态释放
-      await ctx.model.Room.update({ status: 0 }, { 
-        where: { id: lease.room_id }, 
-        transaction: t 
+      // 8. 创建终止版本记录 (TERMINATE)
+      const next_version_no = version.version_no + 1;
+      const term_version = await ctx.model.LeaseVersion.create({
+        ...version.toJSON(),
+        id: undefined,
+        version_no: next_version_no,
+        change_type: 4, 
+        end_date: actual_end_date,
+        remark: `退租结算终止: ${remark || ''}`,
+        created_at: undefined,
+        updated_at: undefined,
+      }, { transaction: t });
+
+      // 9. 房源与租约状态释放
+      await ctx.model.Room.update({ status: 0 }, {
+        where: { id: lease.room_id },
+        transaction: t
       });
 
-      await lease.update({ 
-        status: 3, 
+      await lease.update({
+        status: 3,
         checkout_date: actual_end_date,
+        current_version_id: term_version.id,
       }, { transaction: t });
 
       // 9. 记录流水日志
@@ -310,52 +391,125 @@ class LeaseService extends Service {
 
   /**
    * 租约列表 (Admin)
-   * @param {Object} params - { page, page_size, status, tenant_name, phone, project_id }
+   * @param {Object} params - { page, page_size, status, tenant_name, phone, project_id, filter }
    */
   async list(params) {
     const { ctx, app } = this;
     const { org_id } = ctx;
-    const { page = 1, page_size = 10, status, tenant_name, phone, project_id } = params;
+    const { page = 1, page_size = 10, status, tenant_name, phone, project_id, filter } = params;
     const { Op } = app.Sequelize;
 
     const where = { org_id };
-    if (status !== undefined) where.status = status;
+
+    // 权限与项目隔离：强制使用 ctx.project_id (若存在) 或入参 project_id
+    const effective_project_id = ctx.project_id || project_id;
+
+    if (status !== undefined && status !== '') where.status = status;
+
+    // 处理快捷筛选 (filter)
+    const now = new Date();
+    const dayjs = require('dayjs');
+    if (filter === 'this_month') {
+      where.status = 2; // 仅看生效中
+      where.end_date = { [Op.between]: [dayjs().startOf('month').toDate(), dayjs().endOf('month').toDate()] };
+    } else if (filter === '30_days') {
+      where.status = 2;
+      where.end_date = { [Op.between]: [now, dayjs().add(30, 'day').toDate()] };
+    } else if (filter === '15_days') {
+      where.status = 2;
+      where.end_date = { [Op.between]: [now, dayjs().add(15, 'day').toDate()] };
+    }
 
     const tenant_where = {};
     if (tenant_name) tenant_where.name = { [Op.like]: `%${tenant_name}%` };
     if (phone) tenant_where.phone = { [Op.like]: `%${phone}%` };
 
     const room_where = {};
-    if (project_id) room_where.project_id = project_id;
+    if (effective_project_id) room_where.project_id = effective_project_id;
 
+    // 1. 统计各状态数量 (用于前端 Tab 计数)
+    const stats_rows = await ctx.model.Lease.findAll({
+      where: { org_id },
+      attributes: [
+        [app.Sequelize.col('leases.status'), 'status'],
+        [app.Sequelize.fn('COUNT', app.Sequelize.col('leases.id')), 'count']
+      ],
+      include: [
+        {
+          model: ctx.model.Room,
+          as: 'room',
+          where: effective_project_id ? { project_id: effective_project_id } : undefined,
+          attributes: [],
+          required: !!effective_project_id
+        }
+      ],
+      group: [app.Sequelize.col('leases.status')],
+      raw: true, // 使用 raw: true 简化聚合结果获取
+    });
+
+    const statistics = { total: 0, pending: 0, active: 0, expired: 0, terminated: 0, renewed: 0, adjusted: 0 };
+    stats_rows.forEach(r => {
+      const s = parseInt(r.status);
+      const c = parseInt(r.count);
+      statistics.total += c;
+      if (s === 0) statistics.pending = c;
+      else if (s === 1) statistics.active = c;
+      else if (s === 2) statistics.expired = c;
+      else if (s === 3) statistics.terminated = c;
+      else if (s === 4) statistics.renewed = c;
+      else if (s === 5) statistics.adjusted = c;
+    });
+
+    // 2. 获取分页列表
     const { rows, count } = await ctx.model.Lease.findAndCountAll({
       where,
       offset: (page - 1) * page_size,
       limit: parseInt(page_size),
       include: [
-        { 
-          model: ctx.model.Tenant, 
-          as: 'tenant', 
+        {
+          model: ctx.model.Tenant,
+          as: 'tenant',
           where: Object.keys(tenant_where).length > 0 ? tenant_where : undefined,
-          required: Object.keys(tenant_where).length > 0 
+          required: Object.keys(tenant_where).length > 0
         },
-        { 
-          model: ctx.model.Room, 
-          as: 'room', 
+        {
+          model: ctx.model.Room,
+          as: 'room',
           where: Object.keys(room_where).length > 0 ? room_where : undefined,
           required: Object.keys(room_where).length > 0,
-          include: [{ model: ctx.model.Project, as: 'project' }] 
+          include: [{ model: ctx.model.Project, as: 'project' }]
         },
-        { model: ctx.model.OrgStaff, as: 'manager', attributes: [ 'name' ] },
+        { model: ctx.model.OrgStaff, as: 'manager', attributes: ['name'] },
       ],
-      order: [[ 'created_at', 'DESC' ]],
+      order: [[app.Sequelize.col('leases.created_at'), 'DESC']],
     });
 
-    return { 
-      list: rows, 
-      total: count, 
-      page: parseInt(page), 
-      page_size: parseInt(page_size) 
+    // 3. 构建逾期标识 (注入财务预警字段)
+    const lease_ids = rows.map(r => r.id);
+    const overdue_bills = await ctx.model.Bill.findAll({
+      where: {
+        org_id,
+        lease_id: { [Op.in]: lease_ids },
+        status: { [Op.lt]: 2 }, // 未支付或部分支付
+        due_date: { [Op.lt]: now }
+      },
+      attributes: ['lease_id', 'amount_due', 'amount_paid']
+    });
+
+    const list = rows.map(lease => {
+      const item = lease.toJSON();
+      const my_overdue = overdue_bills.filter(b => b.lease_id === lease.id);
+      item.bill_overdue = my_overdue.length > 0;
+      item.overdue_amount = my_overdue.reduce((sum, b) => sum + (parseFloat(b.amount_due) - parseFloat(b.amount_paid)), 0);
+      return item;
+    });
+
+    return {
+      list,
+      total: count,
+      statistics,
+      page: parseInt(page),
+      page_size: parseInt(page_size)
     };
   }
 }

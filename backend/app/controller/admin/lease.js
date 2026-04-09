@@ -108,14 +108,14 @@ class LeaseController extends Controller {
     const { ctx, service } = this;
     const body = ctx.request.body;
 
-    // 参数适配：tenantName -> tenant_name, projectId -> project_id
     const params = {
       page: body.page || 1,
-      page_size: body.page_size || 10,
+      page_size: body.page_size || 50, // 增大默认分页
       status: body.status,
       tenant_name: body.tenant_name,
       phone: body.phone,
       project_id: body.project_id,
+      filter: body.filter,
     };
 
     const result = await service.admin.lease.list(params);

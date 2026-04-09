@@ -68,6 +68,18 @@ export default {
     },
     actions: {
         /**
+         * [NEW] 从登录结果初始化项目数据
+         */
+        initProjectsFromLogin({ commit, state }, projects) {
+            if (projects && projects.length > 0) {
+                commit("setProjects", projects);
+                // 仅在当前没有选中项目时，才自动选中第一个
+                if (!state.currentProject) {
+                    commit("setCurrentProject", projects[0]);
+                }
+            }
+        },
+        /**
          * 加载项目列表
          */
         async loadProjects({ commit, state }) {
@@ -153,6 +165,12 @@ export default {
         async refreshProjects({ dispatch, commit }) {
             commit("setProjects", []); // 清空现有数据
             return await dispatch("loadProjects");
+        },
+        /**
+         * [NEW] 清除项目数据 (供登出时调用)
+         */
+        clearProjectData({ commit }) {
+            commit("clearProjectData");
         }
     },
     getters: {

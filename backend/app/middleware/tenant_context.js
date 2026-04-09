@@ -16,6 +16,12 @@ module.exports = options => {
       ctx.org_id = parseInt(ctx.query.org_id);
     }
 
+    // [New] 提取项目隔离上下文
+    const projectId = ctx.get('x-project-id');
+    if (projectId) {
+      ctx.project_id = parseInt(projectId);
+    }
+
     await next();
   };
 };

@@ -52,66 +52,62 @@
 
         <!-- 核心信息区域 - 根据状态显示不同内容 -->
         <!-- 空房可租 -->
-        <view class="room-info-box available" v-if="item.status === 1">
+        <view class="room-info-box available" v-if="item.status === 0">
           <view class="price-row">
             <text class="price-label">建议月租</text>
-            <text class="price-value">¥{{ $tools.formatMoney(item.base_rent || 0) }}</text>
+            <text class="price-value">¥{{ $tools.formatMoney(item.rent_price || 0) }}</text>
           </view>
           <view class="info-tags">
-            <text class="info-tag highlight">空置{{ item.vacant_days || 0 }}天</text>
+            <text class="info-tag highlight">空置{{ item.vacancy_days || 0 }}天</text>
           </view>
         </view>
 
-        <!-- 待生效租约 -->
-        <view class="room-info-box pending" v-if="item.status === 1 && item.lease_list">
+        <!-- 已预定 -->
+        <view class="room-info-box pending" v-if="item.status === 2">
           <view class="tenant-row">
             <view class="tenant-info">
-              <text class="tenant-name">{{ item.lease_list?.tenant_info?.real_name || '暂无租户' }}</text>
-              <text class="tenant-phone" @click.stop="handleCall(item.lease_list?.tenant_info?.phone)">
-                {{ item.lease_list?.tenant_info?.phone || '' }}
+              <text class="tenant-name">{{ item.current_lease?.tenant?.name || '预约客户' }}</text>
+              <text class="tenant-phone" @click.stop="handleCall(item.current_lease?.tenant?.phone)">
+                {{ item.current_lease?.tenant?.phone || '' }}
               </text>
             </view>
             <view class="lease-status-tag pending">
-              待生效
+              待入驻
             </view>
           </view>
           <view class="lease-row">
-            <text class="lease-period">{{ $tools.formatDate(item.lease_list?.start_date) }} ~ {{
-              $tools.formatDate(item.lease_list?.end_date) }}</text>
+            <text class="lease-period">起租：{{ $tools.formatDate(item.current_lease?.start_date) }}</text>
             <text class="lease-remaining pending">
-              {{ getDaysUntilStart(item.lease_list?.start_date) }}
+              {{ getDaysUntilStart(item.current_lease?.start_date) }}
             </text>
           </view>
         </view>
 
         <!-- 已出租房间 -->
-        <view class="room-info-box occupied" v-if="item.status === 2">
+        <view class="room-info-box occupied" v-if="item.status === 1">
           <view class="tenant-row">
             <view class="tenant-info">
-              <text class="tenant-name">{{ item.lease_list?.tenant_info?.real_name || '暂无租户' }}</text>
-              <text class="tenant-phone" @click.stop="handleCall(item.lease_list?.tenant_info?.phone)">
-                {{ item.lease_list?.tenant_info?.phone || '' }}
+              <text class="tenant-name">{{ item.current_lease?.tenant?.name || '租户' }}</text>
+              <text class="tenant-phone" @click.stop="handleCall(item.current_lease?.tenant?.phone)">
+                {{ item.current_lease?.tenant?.phone || '' }}
               </text>
             </view>
             <view class="rent-info">
-              <text class="rent-label">月租</text>
-              <text class="rent-value">¥{{ $tools.formatMoney(item.lease_list?.monthly_rent || 0) }}</text>
+              <text class="rent-label">实收租金</text>
+              <text class="rent-value">¥{{ $tools.formatMoney(item.current_lease?.rent_price || 0) }}</text>
             </view>
           </view>
-          <view class="lease-row">
-            <text class="lease-period">{{ $tools.formatDate(item.lease_list?.start_date) }} ~ {{
-              $tools.formatDate(item.lease_list?.end_date) }}</text>
-            <text class="lease-remaining"
-              :class="{ 'warning': item.days_remaining <= 30 && item.days_remaining > 0, 'danger': item.days_remaining <= 0 }">
-              {{ item.days_remaining > 0 ? '剩余' + item.days_remaining + '天' : '已过期' }}
+          <view class="lease-row" v-if="item.current_lease">
+            <text class="lease-period">{{ $tools.formatDate(item.current_lease.start_date) }} ~ {{
+              $tools.formatDate(item.current_lease.end_date) }}</text>
+            <text class="lease-remaining" :class="getLeaseStatusClass(item.current_lease.end_date)">
+              {{ getLeaseStatusText(item.current_lease.end_date) }}
             </text>
           </view>
-          <!-- 异常提醒 -->
-          <view class="alert-box" v-if="item.bill_overdue || item.lease_expiring || item.lease_expired">
+          <!-- 异常提醒 (后端注入) -->
+          <view class="alert-box" v-if="item.has_arrears">
             <text class="alert-icon">⚠️</text>
-            <text class="alert-text" v-if="item.bill_overdue">账单逾期 ¥{{ $tools.formatMoney(item.overdue_amount) }}</text>
-            <text class="alert-text" v-else-if="item.lease_expired">租约已过期{{ item.overdue_days }}天</text>
-            <text class="alert-text" v-else-if="item.lease_expiring">租约即将到期</text>
+            <text class="alert-text">租金欠费 / 账单逾期</text>
           </view>
         </view>
 
@@ -119,10 +115,15 @@
         <view class="room-info-box maintenance" v-if="item.status === 3">
           <view class="maintenance-info">
             <text class="maintenance-reason">{{ item.maintenance_reason || '设施维修中' }}</text>
-            <text class="maintenance-date" v-if="item.maintenance_end_date">
-              预计 {{ $tools.formatDate(item.maintenance_end_date) }} 完成
-            </text>
-            <text class="maintenance-date" v-else>完成时间待定</text>
+            <text class="maintenance-date">状态：报修中</text>
+          </view>
+        </view>
+
+        <!-- 已下架 -->
+        <view class="room-info-box maintenance" v-if="item.status === 4">
+          <view class="maintenance-info">
+            <text class="maintenance-reason">房源已下架</text>
+            <text class="maintenance-date">暂不可进行操作</text>
           </view>
         </view>
 
@@ -158,9 +159,11 @@ export default {
       },
       statusTabs: [
         { label: '全部', value: '', count: 0 },
-        { label: '空房', value: 1, count: 0 },
-        { label: '已租', value: 2, count: 0 },
-        { label: '维护', value: 3, count: 0 }
+        { label: '空置', value: 0, count: 0 },
+        { label: '已租', value: 1, count: 0 },
+        { label: '预定', value: 2, count: 0 },
+        { label: '维修', value: 3, count: 0 },
+        { label: '下架', value: 4, count: 0 }
       ],
       roomList: null
     };
@@ -185,7 +188,6 @@ export default {
   methods: {
     async initPage() {
       await this.loadRoomList();
-      this.loadRoomStatistics();
     },
 
     async loadRoomList(isLoadMore = false) {
@@ -207,11 +209,18 @@ export default {
         const response = await uni.api.getRoomList(params);
 
         if (response.data && response.data.list) {
-          const { list } = response.data;
+          const { list, statistics } = response.data;
+
+          // 1. 更新列表数据
           if (isLoadMore) {
             this.roomList = [...this.roomList, ...list];
           } else {
             this.roomList = list;
+          }
+
+          // 2. 更新顶部统计 (原子化聚合)
+          if (statistics) {
+            this.updateTabsCount(statistics);
           }
         } else {
           if (!isLoadMore) {
@@ -230,59 +239,52 @@ export default {
 
     getStatusTagClass(status) {
       const classMap = {
-        1: 'status-available',
-        2: 'status-occupied',
-        3: 'status-maintenance'
+        0: 'status-available',   // 空置
+        1: 'status-occupied',    // 已租
+        2: 'status-pending',     // 预定
+        3: 'status-maintenance',  // 维修
+        4: 'status-offline'      // 下架
       };
       return classMap[status] || 'status-unknown';
     },
 
     getStatusText(status) {
       const textMap = {
-        1: '空房可租',
-        2: '已出租',
-        3: '维护中'
+        0: '空置中',
+        1: '已出租',
+        2: '已预定',
+        3: '维修中',
+        4: '已下架'
       };
       return textMap[status] || '未知';
     },
 
     getLayoutText(item) {
-      if (item.bedrooms > 0 || item.living_rooms > 0 || item.bathrooms > 0) {
+      if (item.bedroom > 0 || item.parlor > 0 || item.bathroom > 0) {
         let text = '';
-        if (item.bedrooms > 0) text += item.bedrooms + '室';
-        if (item.living_rooms > 0) text += item.living_rooms + '厅';
-        if (item.bathrooms > 0) text += item.bathrooms + '卫';
+        if (item.bedroom > 0) text += item.bedroom + '室';
+        if (item.parlor > 0) text += item.parlor + '厅';
+        if (item.bathroom > 0) text += item.bathroom + '卫';
         return text || '开间';
       }
       return '开间';
     },
 
-    loadRoomStatistics() {
-      uni.api.getRoomStatistics({}).then(response => {
-        if (response.data) {
-          const stats = response.data;
-          const safeStats = {
-            total: stats.total || 0,
-            available: stats.available || 0,
-            occupied: stats.occupied || 0,
-            maintenance: stats.maintenance || 0
-          };
-
-          this.statusTabs.forEach(tab => {
-            if (tab.value === '') {
-              tab.count = safeStats.total;
-            } else if (tab.value == 1) {
-              tab.count = safeStats.available;
-            } else if (tab.value == 2) {
-              tab.count = safeStats.occupied;
-            } else if (tab.value == 3) {
-              tab.count = safeStats.maintenance;
-            }
-          });
+    updateTabsCount(stats) {
+      this.statusTabs.forEach(tab => {
+        if (tab.value === '') {
+          tab.count = stats.total || 0;
+        } else if (tab.value === 0) {
+          tab.count = stats.vacant || 0;
+        } else if (tab.value === 1) {
+          tab.count = stats.occupied || 0;
+        } else if (tab.value === 2) {
+          tab.count = stats.reserved || 0;
+        } else if (tab.value === 3) {
+          tab.count = stats.maintenance || 0;
+        } else if (tab.value === 4) {
+          tab.count = stats.offline || 0;
         }
-      }).catch(error => {
-        console.error('加载房间统计数据失败:', error);
-        this.statusTabs.forEach(tab => { tab.count = 0; });
       });
     },
 
@@ -294,11 +296,22 @@ export default {
     },
 
     handleStatusChange(status) {
+      if (this.formData.status === status) return;
       this.formData.status = status;
-      // 切换状态时重置筛选
       this.formData.filter = '';
-      uni.pageScrollTo({ scrollTop: 0, duration: 0 });
       this.refreshData();
+    },
+
+    getLeaseStatusClass(endDate) {
+      const days = this.$tools.getDaysDiff(endDate);
+      if (days <= 0) return 'danger';
+      if (days <= 30) return 'warning';
+      return '';
+    },
+
+    getLeaseStatusText(endDate) {
+      const days = this.$tools.getDaysDiff(endDate);
+      return days > 0 ? `剩余${days}天` : '已过期';
     },
 
     handleFilterChange(filter) {
@@ -313,23 +326,14 @@ export default {
 
     getDaysUntilStart(startDate) {
       if (!startDate) return '日期未定';
-      const now = new Date();
-      const start = new Date(startDate);
-      const diffTime = start - now;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays > 0) {
-        return `${diffDays}天后开始`;
-      } else if (diffDays === 0) {
-        return '今日开始';
-      } else {
-        return '已开始';
-      }
+      const days = this.$tools.getDaysDiff(startDate);
+      if (days > 0) return `${days}天后开始`;
+      if (days === 0) return '今日开始';
+      return '已开始';
     },
 
     refreshData() {
       this.loadRoomList();
-      this.loadRoomStatistics();
     },
 
     loadMore() {
@@ -369,8 +373,6 @@ export default {
 .room-list-container {
   background: #f5f7fa;
 }
-
-// 筛选标签
 
 // 筛选标签
 .filter-tags {

@@ -7,7 +7,7 @@ export default {
         return http.middleware({
             title: "登录",
             method: "post",
-            url: "/login",
+            url: "/auth/login",
             data: data,
             params: params,
             custom: {
@@ -22,7 +22,7 @@ export default {
         return http.middleware({
             title: "获取用户信息",
             method: "post",
-            url: "/user_info",
+            url: "/auth/info",
             data: data,
             params: params,
             custom: {
@@ -476,7 +476,7 @@ export default {
         return http.middleware({
             title: "获取租约列表",
             method: "post",
-            url: "/leases",
+            url: "/leases/list",
             data: data,
             params: params,
             custom: {
@@ -1070,7 +1070,7 @@ export default {
 
     async getRoomStatistics(data = {}, params = {}) {
         return http.middleware({
-            title: "获取房间统计",
+            title: "获取房源统计",
             method: "post",
             url: "/rooms/statistics",
             data: data,
@@ -1242,7 +1242,7 @@ export default {
         return http.middleware({
             title: "获取首页统计信息",
             method: "post",
-            url: "/dashboard/statistics",
+            url: "/admin/dashboard",
             data: data,
             params: params,
             custom: {

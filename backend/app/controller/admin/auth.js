@@ -23,7 +23,17 @@ class AuthController extends Controller {
     if (!isMatch) {
       return ctx.helper.fail(ctx, 401, '用户名、密码错误或账号状态异常');
     }
-    // 3. 签发 Token (载荷包含身份标识 + 租户隔离ID)
+    // 3. 准入校验：查询该机构下的项目
+    const projects = await ctx.model.Project.findAll({
+      where: { org_id: staff.org_id },
+      attributes: [ 'id', 'name', 'address' ],
+    });
+
+    if (projects.length === 0) {
+      return ctx.helper.fail(ctx, 403, '登录失败：该账号未关联任何项目，请联系管理员分配。');
+    }
+
+    // 4. 签发 Token (载荷包含身份标识 + 租户隔离ID)
     const token = app.jwt.sign({
       uid: staff.id,
       org_id: staff.org_id,
@@ -32,10 +42,13 @@ class AuthController extends Controller {
     ctx.helper.success(ctx, {
       token,
       staff: {
+        id: staff.id,
         name: staff.name,
-        role: staff.role_name,
+        phone: staff.phone,
+        role_name: staff.role_name,
         org_name: staff.organization.name,
       },
+      projects, // 直接下发项目列表
     }, '登录成功');
   }
 

@@ -9,17 +9,16 @@ class FinancialService extends Service {
    * @param {Object} lease - 租约实例
    * @param {Object} t - 事务实例
    */
-  async createLeaseInitialLedger(lease, t) {
+  async createLeaseInitialLedger(lease, version, t) {
     const { ctx } = this;
 
     // 1. 生成押金记录 (押金本)
-    // 默认按照 押1 逻辑，实际可扩展从 payload 传参与 room.rent_price
     await ctx.model.LeaseDeposit.create({
       org_id: lease.org_id,
       lease_id: lease.id,
       tenant_id: lease.tenant_id,
       deposit_type: 1, // 房屋押金
-      amount_expected: lease.rent_price,
+      amount_expected: version.deposit_amount || version.rent_price,
       status: 0,
     }, { transaction: t });
 
@@ -27,12 +26,13 @@ class FinancialService extends Service {
     await ctx.model.Bill.create({
       org_id: lease.org_id,
       lease_id: lease.id,
+      lease_version_id: version.id,
       tenant_id: lease.tenant_id,
-      room_id: lease.room_id,
+      room_id: version.room_id,
       bill_type: 2, // 押金科目
       bill_period: '签署押金',
-      amount_due: lease.rent_price,
-      due_date: lease.start_date,
+      amount_due: version.deposit_amount || version.rent_price,
+      due_date: version.start_date,
       status: 0,
     }, { transaction: t });
 
@@ -40,12 +40,13 @@ class FinancialService extends Service {
     await ctx.model.Bill.create({
       org_id: lease.org_id,
       lease_id: lease.id,
+      lease_version_id: version.id,
       tenant_id: lease.tenant_id,
-      room_id: lease.room_id,
+      room_id: version.room_id,
       bill_type: 1, // 租金科目
-      bill_period: dayjs(lease.start_date).format('YYYY-MM'),
-      amount_due: lease.rent_price,
-      due_date: lease.start_date,
+      bill_period: dayjs(version.start_date).format('YYYY-MM'),
+      amount_due: version.rent_price,
+      due_date: version.start_date,
       status: 0,
     }, { transaction: t });
   }
@@ -120,7 +121,10 @@ class FinancialService extends Service {
   async getLeaseLedger(lease_id) {
     const { ctx } = this;
     const [ bills, deposits ] = await Promise.all([
-      ctx.model.Bill.findAll({ where: { lease_id, org_id: ctx.org_id } }),
+      ctx.model.Bill.findAll({ 
+        where: { lease_id, org_id: ctx.org_id },
+        include: [{ model: ctx.model.BillAdjustment, as: 'adjustments' }]
+      }),
       ctx.model.LeaseDeposit.findAll({ where: { lease_id, org_id: ctx.org_id } }),
     ]);
 
@@ -434,6 +438,38 @@ class FinancialService extends Service {
       }
 
       return deposit;
+    });
+  /**
+   * 申请账单金额微调 (Adjustment)
+   * @param {Object} params - { bill_id, type, amount, remark }
+   * type: 1优惠, 2违约金, 3退款, 4手动
+   */
+  async applyAdjustment(params) {
+    const { ctx } = this;
+    const { org_id } = ctx;
+    const { bill_id, type, amount, remark } = params;
+
+    return await ctx.model.transaction(async t => {
+      const bill = await ctx.model.Bill.findOne({
+        where: { id: bill_id, org_id },
+        transaction: t,
+      });
+
+      if (!bill || bill.status === 2) {
+        ctx.throw(422, '账单不存在或已收清，无法调整');
+      }
+
+      // 1. 创建调整记录 (使用数字类型枚举)
+      const adjustment = await ctx.model.BillAdjustment.create({
+        org_id,
+        bill_id,
+        type: type || 4, // 默认手动调整
+        amount,
+        remark,
+        operator_id: ctx.state.user.uid,
+      }, { transaction: t });
+
+      return adjustment;
     });
   }
 }

@@ -50,7 +50,8 @@ class OpsController extends Controller {
    */
   async getDashboard() {
     const { ctx, service } = this;
-    const stats = await service.admin.ops.getDashboardStats();
+    const projectId = ctx.project_id;
+    const stats = await service.admin.ops.getDashboardStats(projectId);
     ctx.helper.success(ctx, stats);
   }
 }

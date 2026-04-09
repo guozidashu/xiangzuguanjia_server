@@ -17,16 +17,15 @@ module.exports = options => {
     try {
       // 2. 解码并验证 Token
       const decoded = ctx.app.jwt.verify(token, ctx.app.config.jwt.secret);
-      
       // 3. 将用户信息挂载到 ctx.state.user，供后续使用
       ctx.state.user = decoded;
-      
-      // 4. 执行下一个中间件
-      await next();
     } catch (err) {
       // Token 过期或非法
       const msg = err.name === 'TokenExpiredError' ? '登录已过期，请重新登录' : '身份验证失败，请重新登录';
       return ctx.helper.fail(ctx, 401, msg);
     }
+
+    // 4. 执行下一个中间件
+    await next();
   };
 };

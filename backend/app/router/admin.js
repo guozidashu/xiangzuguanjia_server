@@ -24,18 +24,19 @@ module.exports = app => {
   router.post('/api/v1/staffs/update', auth, tenant, admin.staff.update);
   router.post('/api/v1/staffs/set_permissions', auth, tenant, admin.staff.setPermissions);
 
-  // --- 3. 房源资产 (Rooms) ---
-  router.post('/api/v1/rooms/list', auth, tenant, admin.room.index);
+  // --- 3.房源资产 (Rooms) ---
+  router.post('/api/v1/rooms', auth, tenant, admin.room.index);
   router.post('/api/v1/rooms/create', auth, tenant, permission('ROOM_EDIT'), admin.room.create);
   router.post('/api/v1/rooms/detail', auth, tenant, admin.room.show);
   router.post('/api/v1/rooms/update', auth, tenant, permission('ROOM_EDIT'), admin.room.update);
   router.post('/api/v1/rooms/delete', auth, tenant, permission('ROOM_EDIT'), admin.room.destroy);
 
   // --- 4. 项目小区 (Projects) ---
-  router.post('/api/v1/projects/list', auth, tenant, admin.project.index);
+  router.post('/api/v1/projects', auth, tenant, admin.project.index);
   router.post('/api/v1/projects/detail', auth, tenant, admin.project.show);
 
   // --- 5. 租约合同 (Leases) ---
+  router.post('/api/v1/leases', auth, tenant, admin.lease.index);
   router.post('/api/v1/leases/list', auth, tenant, admin.lease.index);
   router.post('/api/v1/leases/detail', auth, tenant, admin.lease.show);
   router.post('/api/v1/leases/sign', auth, tenant, permission('LEASE_SIGN'), admin.lease.sign);
@@ -45,7 +46,7 @@ module.exports = app => {
   router.post('/api/v1/leases/update', auth, tenant, permission('LEASE_SIGN'), admin.lease.update);
 
   // --- 6. 财务管理 (Financial) ---
-  router.post('/api/v1/bills/list', auth, tenant, admin.financial.index);
+  router.post('/api/v1/bills', auth, tenant, admin.financial.index);
   router.post('/api/v1/leases/ledger', auth, tenant, admin.financial.getLeaseLedger);
   router.post('/api/v1/financial/collect', auth, tenant, permission('FINANCE_EDIT'), admin.financial.collectPayment);
   router.post('/api/v1/financial/bills/create', auth, tenant, permission('FINANCE_EDIT'), admin.financial.createManualBill);

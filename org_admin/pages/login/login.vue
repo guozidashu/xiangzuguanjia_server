@@ -3,9 +3,8 @@
     <view class="login-box">
       <!-- 标题 -->
       <view class="title-section">
-        <image mode="widthFix" src="../../static/logo.png" class="logo" />
-        <text class="title">公寓管理系统</text>
-        <text class="subtitle">开发内测版</text>
+        <text class="title">享租管家</text>
+        <text class="subtitle">SaaS 房产管理系统</text>
       </view>
 
       <!-- 登录表单 -->
@@ -22,24 +21,15 @@
             placeholder-class="input-placeholder" @confirm="handleLogin" />
         </view>
 
-        <view class="login-btn" style="background:#FF6400" :class="{ 'loading': loading }" :loading="loading"
-          @click="handleLogin">
+        <view class="login-btn" :class="{ 'loading': loading }" :loading="loading" @click="handleLogin">
           {{ loading ? '登录中...' : '密码登录' }}
         </view>
-
-        <!-- 暂时隐藏授权登录
-        <view style="margin-top: 20rpx;">
-          <view class="login-btn" :class="{ 'loading': loading }" :loading="loading" @click="handleLogin">
-            企业微信授权登录
-          </view>
-        </view>
-        -->
       </view>
 
       <!-- 底部信息 -->
       <view class="footer">
-        <text class="tips">版权所有 © 2025 王可可 wkkdyx@qq.com</text>
-        <text class="version">开发内测版 version 2.x</text>
+        <text class="tips">版权所有 © 2026 享租管家</text>
+        <text class="version">version 2.x</text>
       </view>
     </view>
   </view>
@@ -57,8 +47,8 @@ export default {
   data() {
     return {
       formData: {
-        username: '',
-        password: ''
+        username: '13888888888',
+        password: '$2a$10$EixzaYVK1fsbw1ZfbX3OXe.7WuiJ9Z6G.I5G7A8w6D8A9X6D8A9'
       },
       loading: false
     };
@@ -76,8 +66,8 @@ export default {
   },
 
   methods: {
-    ...mapActions('userMessage', ['login']),
-    ...mapActions('project', ['loadProjects']),
+    ...mapActions('userMessage', ['login', 'logout']),
+    ...mapActions('project', ['initProjectsFromLogin']),
     /**
      * 验证表单
      */
@@ -120,20 +110,22 @@ export default {
       try {
         // 调用登录接口
         const res = await uni.api.login({
-          username: this.formData.username,
+          phone: this.formData.username,
           password: this.formData.password
         });
-        const { token } = res.data;
-        // 使用store管理登录状态（自动获取用户信息）
-        await this.login({ token });
+        const { token, projects, staff } = res.data;
 
-        // 登录成功后立即获取项目列表并设置默认项目
-        await this.loadProjects();
+        // 1. 存储 Token 和 用户信息
+        await this.login({ token, userData: staff });
+
+        // 2. [重要] 直接从登录响应初始化项目列表，跳过冗余请求
+        await this.initProjectsFromLogin(projects);
 
         uni.showToast({
           title: '登录成功',
           icon: 'success'
         });
+
         // 跳转到首页
         setTimeout(() => {
           uni.switchTab({
@@ -153,15 +145,11 @@ export default {
 <style lang="scss" scoped>
 .login-container {
   min-height: 100vh;
-  background: linear-gradient(135deg, #FF6400 0%, #FF6400 100%);
+  background: linear-gradient(135deg, #1890FF 0%, #0050B3 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 40rpx;
-}
-
-.logo {
-  width: 300rpx;
 }
 
 .login-box {
@@ -179,10 +167,11 @@ export default {
 
   .title {
     display: block;
-    font-size: 36rpx;
+    font-size: 44rpx;
     font-weight: bold;
-    color: #333;
-    margin-bottom: 10rpx;
+    color: #1890FF;
+    margin-bottom: 12rpx;
+    letter-spacing: 2rpx;
   }
 
   .subtitle {
@@ -221,7 +210,7 @@ export default {
   .login-btn {
     width: 100%;
     height: 88rpx;
-    background: linear-gradient(135deg, #5B8FF9 0%, #4A7FE8 100%);
+    background: linear-gradient(135deg, #1890FF 0%, #0050B3 100%);
     border-radius: 10rpx;
     font-size: 32rpx;
     color: #fff;
@@ -230,6 +219,8 @@ export default {
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
+    margin-top: 50rpx;
+    box-shadow: 0 6rpx 20rpx rgba(24, 144, 255, 0.3);
 
     &.loading {
       opacity: 0.7;
@@ -242,7 +233,7 @@ export default {
 }
 
 .footer {
-  margin-top: 40rpx;
+  margin-top: 60rpx;
   text-align: center;
 
   .tips {

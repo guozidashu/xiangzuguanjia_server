@@ -9,8 +9,8 @@ const isLocalhost = () => {
 };
 
 export const baseApi = isLocalhost()
-    ? "http://127.0.0.1:7001/api/admin/v1"
-    : "https://api.xy.shangbanbj.cn/api/admin/v1";
+    ? "http://127.0.0.1:7001/api/v1"
+    : "https://api.xiangzu.shangbanbj.cn/api/v1";
 
 
 

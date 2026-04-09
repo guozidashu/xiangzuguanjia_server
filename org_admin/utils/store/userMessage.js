@@ -11,10 +11,11 @@ try {
     if (!userInfo) {
         userInfo = {
             id: "",           // 用户ID
-            real_name: "",    // 真实姓名
-            role: "",          // 用户角色
-            username: "",    // 用户名
-            phone: "",    // 手机号
+            name: "",         // 员工姓名 (对齐模型)
+            role_name: "",    // 角色名称 (对齐模型)
+            username: "",     // 用户名
+            phone: "",        // 手机号
+            org_name: "",     // 机构名称
             is_super_admin: false, // 是否超级管理员
             permissions: [],  // 权限列表
         };
@@ -38,8 +39,6 @@ export default {
     mutations: {
         /**
          * 设置token，并自动更新登录状态和本地缓存
-         * @param {*} state 
-         * @param {*} token 
          */
         setToken(state, token) {
             state.token = token;
@@ -48,30 +47,27 @@ export default {
         },
         /**
          * 更新用户信息，并同步到本地缓存
-         * @param {*} state
-         * @param {*} userData
          */
         updateUserInfo(state, userData) {
             state.userInfo = {
-                id: userData.id,           // 用户ID
-                username: userData.username || "", // 用户名
-                phone: userData.phone || "", // 手机号
-                real_name: userData.real_name || "", // 真实姓名
-                role: userData.role || "",  // 用户角色
-                is_super_admin: userData.is_super_admin || false, // 是否超级管理员
-                permissions: userData.permissions || [] // 权限列表
+                id: userData.id,
+                name: userData.name || "",
+                phone: userData.phone || "",
+                role_name: userData.role_name || "",
+                org_name: userData.org_name || "",
+                is_super_admin: userData.is_super_admin || false,
+                permissions: userData.permissions || []
             };
             uni.setStorageSync("userInfo", state.userInfo);
         },
         /**
-         * 清除用户数据（登出时调用），并清空本地缓存
-         * @param {*} state
+         * 清除用户数据
          */
         clearUserData(state) {
             state.userInfo = {
                 id: "",
-                real_name: "",
-                role: "",
+                name: "",
+                role_name: "",
                 is_super_admin: false,
                 permissions: []
             };
@@ -84,35 +80,33 @@ export default {
     actions: {
         /**
          * 从接口获取用户信息并更新
-         * @param {*} param0
          */
         async fetchUserInfo({ commit }) {
-            await uni.api.getUserInfo().then(response => {
+            try {
+                const response = await uni.api.getUserInfo();
                 commit("updateUserInfo", response.data);
-            }).catch(error => {
+            } catch (error) {
                 console.error("获取用户信息失败:", error);
-            });
+            }
         },
         /**
          * 登录操作，设置token并获取用户信息
-         * @param {*} param0
-         * @param {*} param1
          */
         async login({ commit, dispatch }, { token, userData }) {
             commit("setToken", token);
             if (userData) {
                 commit("updateUserInfo", userData);
             } else {
-                // 如果没有提供用户信息，则从接口获取
                 await dispatch("fetchUserInfo");
             }
         },
         /**
-         * 登出操作，清除用户数据
-         * @param {*} param0 
+         * 登出操作，清除全量业务数据 (联动清除项目状态)
          */
-        async logout({ commit }) {
+        async logout({ commit, dispatch }) {
             commit("clearUserData");
+            // 联动重置项目列表和当前选择的项目
+            await dispatch('project/clearProjectData', null, { root: true });
         }
     },
     getters: {

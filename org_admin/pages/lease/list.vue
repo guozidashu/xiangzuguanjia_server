@@ -7,7 +7,7 @@
       <!-- 筛选标签 - 仅全部或生效中状态下显示 -->
       <template #extra>
         <scroll-view class="filter-tags" scroll-x :show-scrollbar="false" :enhanced="true"
-          v-if="formData.status === '' || formData.status === 2">
+          v-if="formData.status === '' || formData.status === 1">
           <view class="filter-tags-inner">
             <view class="filter-tag level-primary" :class="{ active: formData.filter === 'this_month' }"
               @click="handleFilterChange('this_month')">
@@ -35,11 +35,12 @@
           <view class="lease-title">
             <text class="lease-number">{{ item.lease_number }}</text>
             <view class="status-badge" :class="getStatusTagClass(item.status)">
-              <text v-if="item.status === 1">待生效</text>
-              <text v-else-if="item.status === 2">生效中</text>
-              <text v-else-if="item.status === 3">已到期</text>
-              <text v-else-if="item.status === 4">已解约</text>
-              <text v-else-if="item.status === 5">已续租</text>
+              <text v-if="item.status === 0">待生效</text>
+              <text v-else-if="item.status === 1">生效中</text>
+              <text v-else-if="item.status === 2">已到期</text>
+              <text v-else-if="item.status === 3">已解约</text>
+              <text v-else-if="item.status === 4">已续租</text>
+              <text v-else-if="item.status === 5">已调整</text>
               <text v-else>未知状态</text>
             </view>
           </view>
@@ -47,75 +48,36 @@
 
         <!-- 核心信息区域 -->
         <view class="lease-info-box">
-          <!-- 第一行：左侧姓名，右侧房间号 -->
           <view class="info-row">
             <view class="left-content">
-              <text class="info-value">{{ item.tenant_info.real_name }}</text>
+              <text class="info-value">{{ item.tenant?.name || '租户' }}</text>
             </view>
             <view class="right-content">
-              <text class="info-value">{{ item.room_info.room_number }}</text>
+              <text class="info-value">{{ item.room?.room_number || '-' }}</text>
             </view>
-
           </view>
 
-          <!-- 第二行：左侧月租金：xxx，右侧押金：xxx -->
           <view class="info-row">
             <view class="left-content">
               <text class="info-label">月租金</text>
-              <text class="info-value amount">¥{{ $tools.formatMoney(item.monthly_rent) }}</text>
+              <text class="info-value amount">¥{{ $tools.formatMoney(item.rent_price) }}</text>
             </view>
             <view class="right-content">
-              <text class="info-label">押金</text>
-              <text class="info-value amount">¥{{ $tools.formatMoney(item.deposit) }}</text>
+              <text class="info-label">租期</text>
+              <text class="info-value highlight">{{ getLeaseDaysStatus(item) }}</text>
             </view>
           </view>
 
-          <!-- 第三行：左侧押付方式：压1付3，右侧付款日：每月x号 -->
-          <view class="info-row">
-            <view class="left-content">
-              <text class="info-label">押付方式</text>
-              <text class="info-value">压{{ item.deposit_months }}付{{ item.payment_cycle }}</text>
-            </view>
-            <view class="right-content">
-              <text class="info-label">付款日</text>
-              <text class="info-value">每月{{ item.payment_day }}号</text>
-            </view>
-          </view>
-
-          <!-- 第四行：租期：xxx-xxx -->
           <view class="info-row single">
-            <text class="info-label">租期</text>
-            <text class="info-value">{{ $tools.formatDate(item.start_date) }} ~ {{ $tools.formatDate(item.end_date)
-            }}</text>
+            <text class="info-label">租期范围</text>
+            <text class="info-value">{{ $tools.formatDate(item.start_date) }} ~ {{ $tools.formatDate(item.end_date) }}</text>
           </view>
 
-          <!-- 第五行：左侧合同创建时间，右侧剩余租期xx天 -->
-          <view class="info-row">
-            <view class="left-content">
-              <text class="info-label">合同日期</text>
-              <text class="info-value">{{ $tools.formatDate(item.contract_date) }}</text>
-            </view>
-            <view class="right-content">
-              <text class="info-label">剩余租期</text>
-              <text class="info-value"
-                :class="{ 'warning': item.status === 2 && isExpiringSoon(item), 'danger': item.status === 3 && isExpired(item) }">
-                <template v-if="item.status === 1">{{ getDaysUntilStart(item) }}天后生效</template>
-                <template v-else-if="item.status === 2">{{ getDaysRemaining(item) }}天</template>
-                <template v-else-if="item.status === 3">已逾期{{ getOverdueDays(item) }}天</template>
-                <template v-else-if="item.status === 4">已解约</template>
-                <template v-else-if="item.status === 5">已续租</template>
-              </text>
-            </view>
-          </view>
-
-          <!-- 异常提醒 -->
-          <view class="alert-box"
-            v-if="(item.status === 2 && (isExpiringSoon(item) || item.bill_overdue)) || (item.status === 3 && isExpired(item))">
+          <!-- 异常提醒 (后端注入) -->
+          <view class="alert-box" v-if="item.bill_overdue || (item.status === 1 && isExpiringSoon(item.end_date))">
             <text class="alert-icon">⚠️</text>
-            <text class="alert-text" v-if="item.status === 3 && isExpired(item)">租约已过期{{ getOverdueDays(item) }}天</text>
-            <text class="alert-text" v-else-if="item.status === 2 && item.bill_overdue">账单逾期 ¥{{
-              $tools.formatMoney(item.overdue_amount) }}</text>
-            <text class="alert-text" v-else-if="item.status === 2 && isExpiringSoon(item)">租约即将到期</text>
+            <text class="alert-text" v-if="item.bill_overdue">账单逾期 ¥{{ $tools.formatMoney(item.overdue_amount) }}</text>
+            <text class="alert-text" v-else-if="isExpiringSoon(item.end_date)">该租约即将到期</text>
           </view>
         </view>
 
@@ -141,11 +103,11 @@ export default {
       },
       statusTabs: [
         { label: '全部', value: '', count: 0 },
-        { label: '待生效', value: 1, count: 0 },
-        { label: '生效中', value: 2, count: 0 },
-        { label: '已到期', value: 3, count: 0 },
-        { label: '已解约', value: 4, count: 0 },
-        { label: '已续租', value: 5, count: 0 }
+        { label: '待生效', value: 0, count: 0 },
+        { label: '生效中', value: 1, count: 0 },
+        { label: '已到期', value: 2, count: 0 },
+        { label: '已解约', value: 3, count: 0 },
+        { label: '已续租', value: 4, count: 0 }
       ],
       leaseList: null,  // null: 加载中, []: 无数据, [...]: 有数据
     };
@@ -224,7 +186,6 @@ export default {
   methods: {
     async initPage() {
       await this.loadLeaseList();
-      this.loadLeaseStatistics();
     },
 
     /**
@@ -232,11 +193,12 @@ export default {
      */
     getStatusTagClass(status) {
       const classMap = {
-        1: 'status-pending',     // 待生效
-        2: 'status-active',      // 生效中
-        3: 'status-expired',     // 已到期
-        4: 'status-terminated',  // 已解约
-        5: 'status-renewed'      // 已续租
+        0: 'status-pending',     // 待生效
+        1: 'status-active',      // 生效中
+        2: 'status-expired',     // 已到期
+        3: 'status-terminated',  // 已解约
+        4: 'status-renewed',     // 已续租
+        5: 'status-adjusted'     // 已调整
       };
       return classMap[status] || 'status-unknown';
     },
@@ -255,57 +217,17 @@ export default {
       return cycleMap[cycle] || '月';
     },
 
-    /**
-     * 判断是否即将到期（30天内）
-     */
-    isExpiringSoon(lease) {
-      const endDate = new Date(lease.end_date);
-      const now = new Date();
-      const diffTime = endDate - now;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays <= 30 && diffDays >= 0;
+    isExpiringSoon(date) {
+      if (!date) return false;
+      const days = this.$tools.getDaysDiff(date);
+      return days <= 30 && days >= 0;
     },
 
-    /**
-     * 判断是否已过期
-     */
-    isExpired(lease) {
-      const endDate = new Date(lease.end_date);
-      const now = new Date();
-      return endDate < now;
-    },
-
-    /**
-     * 获取距离生效的天数
-     */
-    getDaysUntilStart(lease) {
-      const startDate = new Date(lease.start_date);
-      const now = new Date();
-      const diffTime = startDate - now;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return Math.max(0, diffDays);
-    },
-
-    /**
-     * 获取租期剩余天数
-     */
-    getDaysRemaining(lease) {
-      const endDate = new Date(lease.end_date);
-      const now = new Date();
-      const diffTime = endDate - now;
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return Math.max(0, diffDays);
-    },
-
-    /**
-     * 获取逾期天数
-     */
-    getOverdueDays(lease) {
-      const endDate = new Date(lease.end_date);
-      const now = new Date();
-      const diffTime = now - endDate;
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      return Math.max(0, diffDays);
+    getLeaseDaysStatus(item) {
+      if (item.status === 0) return `${this.$tools.getDaysDiff(item.start_date)}天后生效`;
+      const days = this.$tools.getDaysDiff(item.end_date);
+      if (days < 0) return `已过期 ${Math.abs(days)} 天`;
+      return `剩余 ${days} 天`;
     },
 
     /**
@@ -399,30 +321,19 @@ export default {
         } else {
           // 将数字状态值转换为后端统计字段名
           const statusMap = {
-            1: 'pending',
-            2: 'active',
-            3: 'expired',
-            4: 'terminated',
-            5: 'renewed'
+            0: 'pending',
+            1: 'active',
+            2: 'expired',
+            3: 'terminated',
+            4: 'renewed',
+            5: 'adjusted'
           };
           tab.count = statistics[statusMap[tab.value]] || 0;
         }
       });
     },
 
-    /**
-     * 加载租约统计数据
-     */
-    async loadLeaseStatistics() {
-      try {
-        const response = await uni.api.getLeaseStatistics({});
-        if (response.data) {
-          this.updateTabsCount(response.data);
-        }
-      } catch (error) {
-        console.error('加载租约统计失败:', error);
-      }
-    },
+
 
     /**
      * 下拉刷新
@@ -436,7 +347,6 @@ export default {
      */
     refreshData() {
       this.loadLeaseList();
-      this.loadLeaseStatistics();
     },
 
     /**

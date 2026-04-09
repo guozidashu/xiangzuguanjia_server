@@ -36,6 +36,9 @@ module.exports = app => {
     app.model.Room.belongsTo(app.model.Project, { foreignKey: 'project_id', as: 'project' });
     app.model.Room.belongsTo(app.model.Org, { foreignKey: 'org_id', as: 'organization' });
     app.model.Room.belongsTo(app.model.OrgStaff, { foreignKey: 'manager_id', as: 'manager' });
+    
+    // [NEW] 关联当前租约：用于列表页展示租客及租金信息
+    app.model.Room.hasOne(app.model.Lease, { foreignKey: 'room_id', as: 'current_lease' });
   };
 
   return Room;

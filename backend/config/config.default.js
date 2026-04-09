@@ -68,6 +68,13 @@ module.exports = appInfo => {
     csrf: {
       enable: false,
     },
+    domainWhiteList: ['http://localhost:5173'],
+  };
+
+  config.cors = {
+    origin: 'http://localhost:5173',
+    allowMethods: 'GET,HEAD,PUT,POST,DELETE,PATCH',
+    credentials: true,
   };
 
   config.view = {

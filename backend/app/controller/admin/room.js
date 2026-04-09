@@ -9,20 +9,18 @@ class RoomController extends Controller {
    */
   async index() {
     const { ctx, service } = this;
-    const body = ctx.request.body; // 获取 POST body
+    const body = ctx.request.body;
 
-    // 支持从 body 中拉取参数，默认值处理
     const params = {
       page: body.page || 1,
       page_size: body.page_size || 20,
       room_number: body.room_number,
-      project_id: body.project_id,
+      project_id: ctx.project_id, // 关键修正：统一使用从 Header 中间件解析出的项目 ID
       status: body.status,
-      filter_type: body.filter_type, // 新增：逾期、到期等筛选
+      filter: body.filter, // 对齐前端参数名
     };
 
     const result = await service.admin.room.list(params);
-
     ctx.helper.success(ctx, result, '查询成功');
   }
 

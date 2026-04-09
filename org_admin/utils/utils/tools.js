@@ -206,11 +206,12 @@ export default {
     getStatusText(type, status) {
         const statusMaps = {
             lease_status: {
-                1: '待生效',
-                2: '生效中',
-                3: '已到期',
-                4: '已解约',
-                5: '续租'
+                0: '待生效',
+                1: '生效中',
+                2: '已到期',
+                3: '已解约',
+                4: '已续租',
+                5: '已调整'
             },
 
             bill_status: {
@@ -240,9 +241,11 @@ export default {
             },
 
             room_status: {
-                1: '空房可租',
-                2: '已出租',
-                3: '维护中'
+                0: '空房可租',
+                1: '已出租',
+                2: '已预定',
+                3: '维修中',
+                4: '已下架'
             },
 
             payment_cycle: {
@@ -287,10 +290,12 @@ export default {
     getStatusColor(type, status) {
         const colorMaps = {
             lease_status: {
-                active: '#52c41a',      // 绿色
-                expired: '#faad14',     // 橙色
-                terminated: '#ff4d4f',   // 红色
-                pending: '#1890ff'       // 蓝色
+                0: '#1890ff',  // 待生效 - 蓝色
+                1: '#52c41a',  // 生效中 - 绿色
+                2: '#faad14',  // 已到期 - 橙色
+                3: '#d9d9d9',  // 已解约 - 灰色
+                4: '#722ed1',  // 已续租 - 紫色
+                5: '#8c8c8c'   // 已调整 - 深灰
             },
             bill_status: {
                 1: '#faad14',      // 待支付 - 橙色
@@ -328,4 +333,38 @@ export default {
         return colorMaps[type]?.[status] || '#d9d9d9'; // 默认灰色
     },
 
+    /**
+     * 计算日期与当前日期的天数差 (Days difference from today)
+     * - 正数表示未来天数
+     * - 负数表示已过去天数/逾期
+     */
+    getDaysDiff(dateStr) {
+        if (!dateStr) return 0;
+        const normalized = dateStr.includes('T') ? dateStr : dateStr.replace(/-/g, '/');
+        const targetDate = new Date(normalized);
+        const today = new Date();
+        
+        // 抹平时间分秒，仅对比日期
+        targetDate.setHours(0, 0, 0, 0);
+        today.setHours(0, 0, 0, 0);
+        
+        const diffTime = targetDate - today;
+        return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    },
+
+    /**
+     * 递归转换对象 Key 为下划线格式
+     */
+    toSnakeCase(obj) {
+        if (Array.isArray(obj)) {
+            return obj.map(v => this.toSnakeCase(v));
+        } else if (obj !== null && obj !== undefined && obj.constructor === Object) {
+            return Object.keys(obj).reduce((result, key) => {
+                const snakeKey = key.replace(/([A-Z])/g, "_$1").toLowerCase().replace(/^_/, "");
+                result[snakeKey] = this.toSnakeCase(obj[key]);
+                return result;
+            }, {});
+        }
+        return obj;
+    },
 }

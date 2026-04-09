@@ -3,8 +3,8 @@
     <!-- 顶部蓝色渐变区域 -->
     <view class="header-bg">
       <view class="header-content">
-        <text class="header-title">新芽空间</text>
-        <text class="header-subtitle">{{ greeting }}，{{ currentUser.real_name || '管理员' }}</text>
+        <text class="header-title">{{ currentUser.org_name || '享租管家' }}</text>
+        <text class="header-subtitle">{{ greeting }}，{{ currentUser.name || '管理员' }}</text>
       </view>
       <xy-project-selector />
     </view>
@@ -34,16 +34,16 @@
       </view>
 
       <!-- 预警事项 -->
-      <warning-card />
+      <!-- <warning-card /> -->
 
       <!-- 财务统计 -->
-      <finance-stats />
+      <!-- <finance-stats /> -->
 
       <!-- 快捷操作 -->
-      <quick-actions />
+      <!-- <quick-actions /> -->
 
       <!-- 账户统计 -->
-      <account-stats />
+      <!-- <account-stats /> -->
 
       <view class="bottom-spacer"></view>
     </view>
@@ -163,10 +163,10 @@ export default {
       uni.api.getDashboardStatistics({}).then(response => {
         const data = response.data;
         this.overviewData = {
-          rentalNumber: data.rentalNumber || 0,
-          vacantNumber: data.vacantNumber || 0,
-          absorptionRate: data.absorptionRate || 0,
-          totalNumber: data.totalNumber || 0
+          rentalNumber: data.rented_rooms || 0,
+          vacantNumber: data.vacant_rooms || 0,
+          absorptionRate: data.absorption_rate || 0,
+          totalNumber: data.total_rooms || 0
         };
       }).catch(error => {
         console.error('加载统计数据失败:', error);

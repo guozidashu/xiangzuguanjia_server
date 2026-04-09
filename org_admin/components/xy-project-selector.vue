@@ -2,11 +2,11 @@
   <view class="project-bar">
     <view class="project-selector" @click="showProjectPicker = true">
       <text class="project-text">
-        当前项目：<text class="project-name" v-if="currentProject">{{ currentProject.project_name }}</text>
+        当前项目：<text class="project-name" v-if="currentProject">{{ currentProject.name }}</text>
         <text class="project-name placeholder" v-else>请选择项目</text>
       </text>
       <view class="dropdown-arrow" :class="{ rotated: showProjectPicker }">
-        <text>▼</text>
+        <view class="arrow-icon"></view>
       </view>
     </view>
 
@@ -28,11 +28,11 @@
           <view class="project-item" v-for="(project, index) in projects" :key="project.id"
             :class="{ active: currentProject && currentProject.id === project.id }" @click="selectProject(project)">
             <view class="project-info">
-              <text class="project-item-name">{{ project.project_name }}</text>
+              <text class="project-item-name">{{ project.name }}</text>
               <text class="project-item-address" v-if="project.address">{{ project.address }}</text>
             </view>
             <view class="project-item-check" v-if="currentProject && currentProject.id === project.id">
-              <text>✓</text>
+              <view class="check-icon"></view>
             </view>
           </view>
         </view>
@@ -62,9 +62,11 @@ export default {
       showProjectPicker: false
     };
   },
-  async onLoad() {
-    // 组件加载时初始化项目数据
-    await this.loadProjects();
+  mounted() {
+    // 组件挂载时检查项目数据，如果为空则加载
+    if (this.projects.length === 0) {
+      this.loadProjects();
+    }
   },
   methods: {
     ...mapActions('project', [
@@ -75,8 +77,19 @@ export default {
      * 选择项目
      */
     async selectProject(project) {
+      if (this.currentProject && this.currentProject.id === project.id) {
+        this.showProjectPicker = false;
+        return;
+      }
       this.showProjectPicker = false;
-      await this.switchProject(project);
+      uni.showLoading({ title: '切换中...' });
+      try {
+        await this.switchProject(project);
+        // 触发全局刷新事件 (首页等页面会监听此事件)
+        uni.$emit('projectSwitched', project);
+      } finally {
+        uni.hideLoading();
+      }
     },
 
     /**
@@ -126,17 +139,24 @@ export default {
     }
 
     .dropdown-arrow {
-      width: 48rpx;
-      height: 48rpx;
+      width: 32rpx;
+      height: 32rpx;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 20rpx;
-      color: rgba(255, 255, 255, 0.8);
-      transition: transform 0.3s;
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+      .arrow-icon {
+        width: 12rpx;
+        height: 12rpx;
+        border-right: 4rpx solid rgba(255, 255, 255, 0.8);
+        border-bottom: 4rpx solid rgba(255, 255, 255, 0.8);
+        transform: rotate(45deg);
+        margin-top: -6rpx;
+      }
 
       &.rotated {
-        transform: rotate(180deg);
+        transform: rotate(-135deg) translateY(-2rpx);
       }
     }
   }
@@ -236,17 +256,24 @@ export default {
       }
 
       .project-item-check {
-        width: 48rpx;
-        height: 48rpx;
+        width: 40rpx;
+        height: 40rpx;
         background: #1890ff;
         border-radius: 50%;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 24rpx;
-        color: #fff;
         margin-left: 20rpx;
         flex-shrink: 0;
+
+        .check-icon {
+          width: 16rpx;
+          height: 8rpx;
+          border-left: 3rpx solid #ffffff;
+          border-bottom: 3rpx solid #ffffff;
+          transform: rotate(-45deg);
+          margin-top: -4rpx;
+        }
       }
     }
 

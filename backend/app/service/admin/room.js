@@ -10,13 +10,12 @@ class RoomService extends Service {
    * @return {Promise} { list, total }
    */
   /**
-   * 分页查询房源列表 (带租户隔离)
    * @param {Object} params - 过滤参数
    * @return {Promise} { list, total }
    */
   async list(params) {
     const { ctx, app } = this;
-    const { page = 1, page_size = 20, room_number, project_id, status, overdue, expiring_15, expired } = params;
+    const { page = 1, page_size = 20, room_number, project_id, status, filter } = params;
     const offset = (Math.max(1, page) - 1) * page_size;
     const { Op } = app.Sequelize;
     const dayjs = require('dayjs');
@@ -24,92 +23,146 @@ class RoomService extends Service {
     const where = { org_id: ctx.org_id };
     if (room_number) where.room_number = { [Op.like]: `%${room_number}%` };
     if (project_id) where.project_id = project_id;
+
+    // 状态筛选：前端 0-4
     if (status !== undefined && status !== '') where.status = status;
 
-    // 高级业务筛选
+    // 高级业务筛选 (基于前端 filter 字符串)
     const now = new Date();
-    if (overdue === 'true') {
+    if (filter === 'bill_overdue') {
       const overdue_bills = await ctx.model.Bill.findAll({
-        attributes: [ 'room_id' ],
+        attributes: ['room_id'],
         where: {
           org_id: ctx.org_id,
           status: { [Op.lt]: 2 },
           due_date: { [Op.lt]: now },
         },
-        group: [ 'room_id' ],
+        group: ['room_id'],
       });
       where.id = { [Op.in]: overdue_bills.map(b => b.room_id) };
-    } else if (expiring_15 === 'true') {
-      const expiring_date = dayjs().add(15, 'day').toDate();
-      const expiring_leases = await ctx.model.Lease.findAll({
-        attributes: [ 'room_id' ],
+    } else if (filter === 'bill_expiring') {
+      // 7天内逾期
+      const expiring_date = dayjs().add(7, 'day').toDate();
+      const expiring_bills = await ctx.model.Bill.findAll({
+        attributes: ['room_id'],
         where: {
           org_id: ctx.org_id,
-          status: 1,
-          end_date: { [Op.between]: [ now, expiring_date ] },
+          status: { [Op.lt]: 2 },
+          due_date: { [Op.between]: [now, expiring_date] },
         },
-        group: [ 'room_id' ],
+        group: ['room_id'],
+      });
+      where.id = { [Op.in]: expiring_bills.map(b => b.room_id) };
+    } else if (filter === 'lease_expiring') {
+      // 15天租期到期
+      const expiring_date = dayjs().add(15, 'day').toDate();
+      const expiring_leases = await ctx.model.Lease.findAll({
+        attributes: ['room_id'],
+        where: {
+          org_id: ctx.org_id,
+          status: 1, // 生效中
+          end_date: { [Op.between]: [now, expiring_date] },
+        },
+        group: ['room_id'],
       });
       where.id = { [Op.in]: expiring_leases.map(l => l.room_id) };
-    } else if (expired === 'true') {
+    } else if (filter === 'lease_expired') {
+      // 租期已过期
       const expired_leases = await ctx.model.Lease.findAll({
-        attributes: [ 'room_id' ],
+        attributes: ['room_id'],
         where: {
           org_id: ctx.org_id,
           status: 1,
           end_date: { [Op.lt]: now },
         },
-        group: [ 'room_id' ],
+        group: ['room_id'],
       });
       where.id = { [Op.in]: expired_leases.map(l => l.room_id) };
     }
 
+    // A. 执行房源列表查询 (带关联)
     const { rows, count } = await ctx.model.Room.findAndCountAll({
       where,
       limit: parseInt(page_size),
       offset: parseInt(offset),
       include: [
-        { model: ctx.model.Project, as: 'project', attributes: [ 'name', 'address' ] },
+        { model: ctx.model.Project, as: 'project', attributes: ['name', 'address'] },
+        {
+          model: ctx.model.Lease,
+          as: 'current_lease',
+          required: false,
+          where: { status: 1 }, // 仅关联生效中租约
+          include: [{ model: ctx.model.Tenant, as: 'tenant', attributes: ['id', 'name', 'phone'] }]
+        }
       ],
-      order: [[ 'created_at', 'DESC' ]],
+      order: [['created_at', 'DESC']],
       distinct: true,
     });
 
-    const list = await Promise.all(rows.map(async room => {
-      const item = room.toJSON();
-      
-      const current_lease = await ctx.model.Lease.findOne({
-        where: { room_id: room.id, status: 1 },
-        include: [{ model: ctx.model.Tenant, as: 'tenant', attributes: [ 'name', 'phone' ] }],
-      });
-      item.current_lease = current_lease;
+    // B. 执行统计聚合 (仅基于项目隔离，忽略列表过滤)
+    const stats_where = { org_id: ctx.org_id };
+    if (project_id) stats_where.project_id = project_id;
 
-      const has_arrears = await ctx.model.Bill.findOne({
-        where: {
-          room_id: room.id,
-          status: { [Op.lt]: 2 },
-          due_date: { [Op.lt]: now },
-        },
-      });
-      item.has_arrears = !!has_arrears;
+    const raw_stats = await ctx.model.Room.findAll({
+      where: stats_where,
+      attributes: [
+        'status',
+        [app.Sequelize.fn('COUNT', app.Sequelize.col('id')), 'count']
+      ],
+      group: ['status'],
+    });
+
+    const statistics = {
+      total: 0,
+      vacant: 0,     // 0
+      occupied: 0,   // 1
+      reserved: 0,   // 2
+      maintenance: 0, // 3
+      offline: 0     // 4
+    };
+
+    raw_stats.forEach(r => {
+      const s = parseInt(r.get('status'));
+      const c = parseInt(r.get('count'));
+      statistics.total += c;
+      if (s === 0) statistics.vacant = c;
+      else if (s === 1) statistics.occupied = c;
+      else if (s === 2) statistics.reserved = c;
+      else if (s === 3) statistics.maintenance = c;
+      else if (s === 4) statistics.offline = c;
+    });
+
+    // 1. 获取所有有逾期账单的房间 ID (用于标记红点)
+    const overdueRoomIds = await ctx.model.Bill.findAll({
+      attributes: ['room_id'],
+      where: {
+        org_id: ctx.org_id,
+        status: { [Op.lt]: 2 }, // 未结清
+        due_date: { [Op.lt]: now } // 已逾期
+      },
+      group: ['room_id']
+    }).then(res => res.map(r => r.room_id));
+
+    // C. 列表二次加工：计算空置天数 + 注入欠费标识
+    const list = rows.map(room => {
+      const item = room.toJSON();
+
+      // 标记欠费/逾期提醒
+      item.has_arrears = overdueRoomIds.includes(room.id);
 
       if (room.status === 0) {
-        const last_lease = await ctx.model.Lease.findOne({
-          where: { room_id: room.id, status: { [Op.gte]: 2 } },
-          order: [[ 'checkout_date', 'DESC' ], [ 'end_date', 'DESC' ]],
-        });
-        const base_date = last_lease ? (last_lease.checkout_date || last_lease.end_date) : room.created_at;
-        item.vacancy_days = dayjs().diff(dayjs(base_date), 'day');
+        // 简化空置计算逻辑：如果没有历史租约，使用创建时间
+        item.vacancy_days = dayjs().diff(dayjs(room.created_at), 'day');
       } else {
         item.vacancy_days = 0;
       }
-
       return item;
-    }));
+    });
 
     return {
       list,
       total: count,
+      statistics,
       page: parseInt(page),
       page_size: parseInt(page_size),
     };
@@ -133,7 +186,7 @@ class RoomService extends Service {
     if (exists) ctx.throw(422, `该项目下已存在房号: ${payload.room_number}`);
 
     const room = await ctx.model.Room.create(payload);
-    
+
     await ctx.model.RoomStatusLog.create({
       org_id: ctx.org_id,
       room_id: room.id,
@@ -154,8 +207,8 @@ class RoomService extends Service {
       where: { id, org_id: ctx.org_id },
       include: [
         { model: ctx.model.Project, as: 'project' },
-        { 
-          model: ctx.model.Device, 
+        {
+          model: ctx.model.Device,
           as: 'devices',
           where: { org_id: ctx.org_id },
           required: false
@@ -194,7 +247,7 @@ class RoomService extends Service {
    */
   async destroy(id) {
     const room = await this.detail(id);
-    if (![ 0, 4 ].includes(room.status)) {
+    if (![0, 4].includes(room.status)) {
       this.ctx.throw(422, '房源当前处于非离线状态，不可直接删除');
     }
     return await room.destroy();

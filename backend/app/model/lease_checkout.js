@@ -6,7 +6,9 @@ module.exports = app => {
   const LeaseCheckout = app.model.define('lease_checkouts', {
     id: { type: INTEGER, primaryKey: true, autoIncrement: true },
     org_id: { type: INTEGER, allowNull: false, comment: '所属机构ID' },
+    project_id: { type: INTEGER, allowNull: true, comment: '所属项目ID' },
     lease_id: { type: INTEGER, allowNull: false, comment: '关联租约ID' },
+    tenant_id: { type: INTEGER, allowNull: true, comment: '租客ID' },
     checkout_type: { type: TINYINT, allowNull: false, comment: '1正常, 2违约, 3提前, 4换房' },
     checkout_date: { type: DATE, allowNull: false, comment: '结算日期' },
     final_electric_reading: { type: DECIMAL(10, 2), comment: '电末数' },

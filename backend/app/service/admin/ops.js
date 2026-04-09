@@ -129,17 +129,31 @@ class OpsService extends Service {
   /**
    * 获取全机构运营 Dashboard 统计数据
    */
-  async getDashboardStats() {
+  async getDashboardStats(projectId) {
     const { ctx, app } = this;
     const { org_id } = ctx;
     const { Op } = app.Sequelize;
     const dayjs = require('dayjs');
     const today = dayjs().startOf('day').toDate();
     const month_start = dayjs().startOf('month').toDate();
+    const now_date = new Date();
 
-    // 1. 房源状态统计
+    // 0. 获取该项目下所有房间 ID (用于跨表统计隔离)
+    const projectRoomIds = await ctx.model.Room.findAll({
+      where: { org_id, project_id: projectId },
+      attributes: ['id']
+    }).then(res => res.map(r => r.id));
+
+    if (projectRoomIds.length === 0) {
+      return {
+        total_rooms: 0, rented_rooms: 0, vacant_rooms: 0, absorption_rate: 0,
+        today_revenue: 0, month_revenue: 0, overdue_amount: 0, expiring_soon_count: 0
+      };
+    }
+
+    // 1. 房源状态统计 (已对齐项目)
     const room_stats = await ctx.model.Room.findAll({
-      where: { org_id: org_id },
+      where: { org_id, project_id: projectId },
       attributes: [
         'status',
         [ app.Sequelize.fn('COUNT', app.Sequelize.col('id')), 'count' ]
@@ -147,38 +161,43 @@ class OpsService extends Service {
       group: [ 'status' ],
     });
 
-    // 2. 财务大盘统计
-    // 今日实收
-    const today_revenue = await ctx.model.PaymentRecord.sum('amount', {
+    // 2. 财务大盘统计 (改为从已结清账单统计，以确保项目隔离精度)
+    // 今日实收 (基于账单结清时间)
+    const today_revenue = await ctx.model.Bill.sum('amount_paid', {
       where: { 
-        org_id: org_id, 
-        trade_type: 1, 
-        trade_time: { [Op.gte]: today } 
+        org_id, 
+        room_id: { [Op.in]: projectRoomIds },
+        status: 2, 
+        paid_time: { [Op.gte]: today } 
       }
     }) || 0;
 
     // 本月累计实收
-    const month_revenue = await ctx.model.PaymentRecord.sum('amount', {
+    const month_revenue = await ctx.model.Bill.sum('amount_paid', {
       where: { 
-        org_id: org_id, 
-        trade_type: 1, 
-        trade_time: { [Op.gte]: month_start } 
+        org_id, 
+        room_id: { [Op.in]: projectRoomIds },
+        status: 2, 
+        paid_time: { [Op.gte]: month_start } 
       }
     }) || 0;
 
     // 待收总额与逾期金额
     const unpaid_bills = await ctx.model.Bill.findAll({
-      where: { org_id: org_id, status: 0 },
-      attributes: [ 'due_date', 'amount_due' ]
+      where: { 
+        org_id, 
+        room_id: { [Op.in]: projectRoomIds },
+        status: { [Op.lt]: 2 } 
+      },
+      attributes: [ 'due_date', 'amount_due', 'amount_paid' ]
     });
 
     let total_pending = 0;
     let total_overdue = 0;
-    const now = dayjs();
     unpaid_bills.forEach(b => {
-      const amt = parseFloat(b.amount_due);
+      const amt = parseFloat(b.amount_due) - parseFloat(b.amount_paid);
       total_pending += amt;
-      if (dayjs(b.due_date).isBefore(now)) {
+      if (dayjs(b.due_date).isBefore(dayjs())) {
         total_overdue += amt;
       }
     });
@@ -187,7 +206,8 @@ class OpsService extends Service {
     // 30 天内即将到期的租约
     const expiring_soon_count = await ctx.model.Lease.count({
       where: {
-        org_id: org_id,
+        org_id,
+        room_id: { [Op.in]: projectRoomIds },
         status: 1,
         end_date: {
           [Op.between]: [ today, dayjs().add(30, 'day').toDate() ]
@@ -195,22 +215,22 @@ class OpsService extends Service {
       }
     });
 
+    // 汇总指标
+    const total_rooms = projectRoomIds.length;
+    const rented_rooms = parseInt(room_stats.find(r => r.status === 1)?.get('count') || 0);
+    const vacant_rooms = parseInt(room_stats.find(r => r.status === 0)?.get('count') || 0);
+    const absorption_rate = total_rooms > 0 ? ((rented_rooms / total_rooms) * 100).toFixed(2) : 0;
+
     return {
-      rooms: {
-        total: room_stats.reduce((s, r) => s + parseInt(r.get('count')), 0),
-        rented: room_stats.find(r => r.status === 1)?.get('count') || 0,
-        vacant: room_stats.find(r => r.status === 0)?.get('count') || 0,
-        reserved: room_stats.find(r => r.status === 2)?.get('count') || 0,
-      },
-      finance: {
-        today_revenue,
-        month_revenue,
-        total_pending,
-        total_overdue,
-      },
-      leases: {
-        expiring_soon: expiring_soon_count,
-      }
+      total_rooms,
+      rented_rooms,
+      vacant_rooms,
+      absorption_rate: parseFloat(absorption_rate),
+      today_revenue: parseFloat(today_revenue),
+      month_revenue: parseFloat(month_revenue),
+      overdue_amount: total_overdue,
+      total_pending: total_pending,
+      expiring_soon_count,
     };
   }
 }
