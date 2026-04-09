@@ -14,7 +14,7 @@ module.exports = () => {
 
       // 2. 提取 HTTP 状态码与异常明细
       const status = err.status || 500;
-      
+
       // 3. 生产环境脱敏 500 错误
       const message = (status === 500 && ctx.app.config.env === 'prod')
         ? '服务器繁忙，请稍后再试'

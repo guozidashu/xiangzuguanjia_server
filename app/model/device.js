@@ -10,6 +10,8 @@ module.exports = app => {
     room_id: { type: INTEGER, comment: '关联房间ID' },
     device_sn: { type: STRING(100), allowNull: false, unique: true, comment: 'SN号' },
     yunding_id: { type: STRING(100), comment: '云丁设备UUID' },
+    yunding_room_id: { type: STRING(100), comment: '云丁内部房间ID' },
+    yunding_home_id: { type: STRING(100), comment: '云丁内部房源ID(home_id)' },
     device_type: { type: TINYINT, allowNull: false, comment: '1电表, 2水表, 3门锁' },
     status: { type: TINYINT, defaultValue: 1, comment: '0离线, 1在线, 2故障' },
     current_reading: { type: DECIMAL(10, 2), defaultValue: 0.00, comment: '当前读数' },

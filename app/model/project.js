@@ -8,7 +8,6 @@ module.exports = app => {
     org_id: { type: INTEGER, allowNull: false, comment: '所属机构ID' },
     name: { type: STRING(100), allowNull: false, comment: '项目/小区名称' },
     address: { type: STRING(255), comment: '项目地址' },
-    yunding_id: { type: STRING(100), comment: '云丁房源ID(home_id)' },
     description: { type: TEXT, comment: '项目描述' },
     created_at: { type: DATE, defaultValue: app.Sequelize.literal('CURRENT_TIMESTAMP') },
     updated_at: { type: DATE, defaultValue: app.Sequelize.literal('CURRENT_TIMESTAMP') },

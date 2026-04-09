@@ -11,7 +11,6 @@ module.exports = app => {
     room_number: { type: STRING(50), allowNull: false, comment: '房号' },
     building_name: { type: STRING(100), comment: '楼栋名称' },
     floor: { type: INTEGER, comment: '楼层' },
-    yunding_id: { type: STRING(100), comment: '云丁房间ID(room_id)' },
     bedroom: { type: TINYINT, defaultValue: 1, comment: '几室' },
     parlor: { type: TINYINT, defaultValue: 0, comment: '几厅' },
     bathroom: { type: TINYINT, defaultValue: 1, comment: '几卫' },
@@ -33,7 +32,7 @@ module.exports = app => {
     tableName: 'rooms',
   });
 
-  Room.associate = function() {
+  Room.associate = function () {
     app.model.Room.belongsTo(app.model.Project, { foreignKey: 'project_id', as: 'project' });
     app.model.Room.belongsTo(app.model.Org, { foreignKey: 'org_id', as: 'organization' });
     app.model.Room.belongsTo(app.model.OrgStaff, { foreignKey: 'manager_id', as: 'manager' });

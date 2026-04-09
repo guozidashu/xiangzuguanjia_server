@@ -5,21 +5,20 @@ const Service = require('egg').Service;
 class RoomService extends Service {
   /**
    * 分页查询房源列表 (带租户隔离)
+   * 增强功能：支持逾期、到期筛选，自动关联租客/租约信息，计算空置天数
    * @param {Object} params - 过滤参数
    * @return {Promise} { list, total }
    */
   async list(params) {
     const { ctx, app } = this;
-    const { page = 1, pageSize = 20, roomNumber, projectId, status } = params;
+    const { page = 1, pageSize = 20, roomNumber, projectId, status, filterType } = params;
     const offset = (Math.max(1, page) - 1) * pageSize;
+    const { Op } = app.Sequelize;
 
-    // 核心 SaaS 隔离逻辑：只能查到自己机构的数据
-    const where = {
-      org_id: ctx.orgId,
-    };
-
+    // 1. 基础过滤条件
+    const where = { org_id: ctx.orgId };
     if (roomNumber) {
-      where.room_number = { [app.Sequelize.Op.like]: `%${roomNumber}%` };
+      where.room_number = { [Op.like]: `%${roomNumber}%` };
     }
     if (projectId) {
       where.project_id = projectId;
@@ -28,6 +27,52 @@ class RoomService extends Service {
       where.status = status;
     }
 
+    // 2. 核心：处理业务逻辑筛选 (filterType)
+    // 注意：这里我们可能需要通过关联表 ID 列表来进行过滤
+    if (filterType) {
+      const now = new Date();
+      if (filterType === 'overdue') {
+        // 筛选有欠费账单的房源 (status < 2 且已过应缴日)
+        const overdueBills = await ctx.model.Bill.findAll({
+          attributes: [ 'room_id' ],
+          where: {
+            org_id: ctx.orgId,
+            status: { [Op.lt]: 2 },
+            due_date: { [Op.lt]: now },
+          },
+          group: [ 'room_id' ],
+        });
+        where.id = { [Op.in]: overdueBills.map(b => b.room_id) };
+      } else if (filterType === 'expiring_15') {
+        // 筛选 15 天内到期的房源 (有效租约的 end_date)
+        const expiringDate = new Date();
+        expiringDate.setDate(now.getDate() + 15);
+        const expiringLeases = await ctx.model.Lease.findAll({
+          attributes: [ 'room_id' ],
+          where: {
+            org_id: ctx.orgId,
+            status: 1, // 生效中
+            end_date: { [Op.between]: [ now, expiringDate ] },
+          },
+          group: [ 'room_id' ],
+        });
+        where.id = { [Op.in]: expiringLeases.map(l => l.room_id) };
+      } else if (filterType === 'expired') {
+        // 筛选已过期的房源 (生效中租约但时间已过，或系统未及时变更状态的)
+        const expiredLeases = await ctx.model.Lease.findAll({
+          attributes: [ 'room_id' ],
+          where: {
+            org_id: ctx.orgId,
+            status: 1,
+            end_date: { [Op.lt]: now },
+          },
+          group: [ 'room_id' ],
+        });
+        where.id = { [Op.in]: expiredLeases.map(l => l.room_id) };
+      }
+    }
+
+    // 3. 执行主查询
     const { rows, count } = await ctx.model.Room.findAndCountAll({
       where,
       limit: parseInt(pageSize),
@@ -37,10 +82,49 @@ class RoomService extends Service {
         { model: ctx.model.OrgStaff, as: 'manager', attributes: [ 'name' ] },
       ],
       order: [[ 'created_at', 'DESC' ]],
+      distinct: true, // 防止关联查询导致的分页计数错误
     });
 
+    // 4. 组装展示层数据 (补充租约、租客、空置天数、欠费状态)
+    const list = await Promise.all(rows.map(async room => {
+      const item = room.toJSON();
+      
+      // 获取当前生效租约及租客
+      const currentLease = await ctx.model.Lease.findOne({
+        where: { room_id: room.id, status: 1 },
+        include: [{ model: ctx.model.Tenant, as: 'tenant', attributes: [ 'name', 'phone' ] }],
+      });
+      item.currentLease = currentLease;
+
+      // 检查该房间是否有欠费 (实时判断)
+      const hasArrears = await ctx.model.Bill.findOne({
+        where: {
+          room_id: room.id,
+          status: { [Op.lt]: 2 },
+          due_date: { [Op.lt]: new Date() },
+        },
+      });
+      item.hasArrears = !!hasArrears;
+
+      // 如果是空置房，计算空置天数
+      if (room.status === 0) {
+        // 找最近的一份已退记录
+        const lastLease = await ctx.model.Lease.findOne({
+          where: { room_id: room.id, status: { [Op.gte]: 2 } },
+          order: [[ 'checkout_date', 'DESC' ], [ 'end_date', 'DESC' ]],
+        });
+        const baseDate = lastLease ? (lastLease.checkout_date || lastLease.end_date) : room.created_at;
+        const diff = Math.max(0, new Date() - new Date(baseDate));
+        item.vacancy_days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      } else {
+        item.vacancy_days = 0;
+      }
+
+      return item;
+    }));
+
     return {
-      list: rows,
+      list,
       total: count,
       page: parseInt(page),
       pageSize: parseInt(pageSize),

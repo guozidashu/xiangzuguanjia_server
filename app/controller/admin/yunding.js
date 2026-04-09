@@ -85,7 +85,30 @@ class YundingController extends Controller {
     const { orgId } = ctx;
 
     if (!orgId || !home_id) {
-      ctx.body = { code: 400, message: 'Missing orgId or home_id' };
+      // 如果没有传 home_id，尝试通过 uuid (device_sn/uuid) 自动找回
+      if (uuid) {
+        const device = await ctx.model.Device.findOne({ where: { org_id: orgId, yunding_id: uuid } });
+        if (device && device.yunding_home_id) {
+          try {
+            const response = await service.admin.yunding.getElemeterInfo(orgId, {
+              uuid: device.yunding_id,
+              home_id: device.yunding_home_id,
+              room_id: device.yunding_room_id
+            });
+            ctx.body = {
+              code: 200,
+              message: response.ErrNo === 0 ? '获取成功' : `接口返回: ${response.ErrMsg}`,
+              data: response
+            };
+            return;
+          } catch (err) {
+            this.logger.error('Get Meter Info Error:', err);
+            ctx.body = { code: 500, message: err.message };
+            return;
+          }
+        }
+      }
+      ctx.body = { code: 400, message: 'Missing orgId or home_id (and could not auto-find via uuid)' };
       return;
     }
 
@@ -216,6 +239,68 @@ class YundingController extends Controller {
       };
     } catch (err) {
       this.logger.error('Sync Assets Error:', err);
+      ctx.body = { code: 500, message: err.message };
+    }
+  }
+
+  /**
+   * 获取电表用电增量记录
+   * POST /api/v1/yunding/meter-consumption
+   */
+  async getMeterConsumption() {
+    const { ctx, service } = this;
+    const { orgId } = ctx;
+    const { uuid, startTime, endTime } = ctx.request.body;
+
+    if (!orgId || !uuid || !startTime || !endTime) {
+      ctx.body = { code: 400, message: 'Missing parameters: uuid, startTime, endTime' };
+      return;
+    }
+
+    try {
+      const response = await service.admin.yunding.fetchPowerConsumption(orgId, uuid, startTime, endTime);
+      ctx.body = {
+        code: 200,
+        message: response.ErrNo === 0 ? '获取成功' : `接口返回: ${response.ErrMsg}`,
+        data: response
+      };
+    } catch (err) {
+      this.logger.error('Get Meter Consumption Error:', err);
+      ctx.body = { code: 500, message: err.message };
+    }
+  }
+
+  /**
+   * 获取电表充值历史记录
+   * POST /api/v1/yunding/meter-recharge-records
+   */
+  async getRechargeRecords() {
+    const { ctx, service } = this;
+    const { orgId } = ctx;
+    const { home_id, room_id, uuid, start_time, end_time, offset, count } = ctx.request.body;
+
+    if (!orgId || !home_id) {
+      ctx.body = { code: 400, message: 'Missing parameters: home_id' };
+      return;
+    }
+
+    try {
+      const response = await service.admin.yunding.getRechargeRecord(orgId, {
+        home_id,
+        room_id,
+        uuid,
+        start_time,
+        end_time,
+        offset,
+        count
+      });
+      ctx.body = {
+        code: 200,
+        message: response.ErrNo === 0 ? '获取成功' : `接口返回: ${response.ErrMsg}`,
+        data: response
+      };
+    } catch (err) {
+      this.logger.error('Get Recharge Records Error:', err);
       ctx.body = { code: 500, message: err.message };
     }
   }

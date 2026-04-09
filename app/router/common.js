@@ -10,6 +10,9 @@ module.exports = app => {
   // --- 1. 微信公共回调 (Wechat Callbacks) ---
   router.post('/api/app/wechat/notify', controller.common.wechat.paymentNotify);
 
-  // --- 2. 系统调试 (Debug) ---
+  // --- 2. 云丁物联回调 (Yunding Callbacks) ---
+  router.post('/api/common/yunding/callback', controller.common.yunding.callback);
+
+  // --- 3. 系统调试 (Debug) ---
   router.get('/debug/pay', controller.common.debug.payTest);
 };

@@ -18,14 +18,37 @@ class YundingV3Service extends Service {
   }
 
   /**
-   * [V2/V3] 验证回调签名 (MD5 模式)
+   * [V2] 验证回调签名 (严格遵循官方 5.4.1 算法)
+   * @param {string} callbackUrl - 回调的完整 URL 地址 (不带参数部分)
+   * @param {Object} params - 接收到的所有参数 (包含 sign)
+   * @param {string} sign - 待验证的签名值
    */
   verifyCallbackSignature(callbackUrl, params, sign) {
     if (!sign) return false;
-    const keys = Object.keys(params).sort();
-    const queryStr = keys.map(key => `${key}=${params[key]}`).join('&');
-    const rawStr = callbackUrl + queryStr;
-    const calculatedSign = crypto.createHash('md5').update(rawStr).digest('hex');
+
+    // 1. 过滤并排序参数名 (ASCII 字典序)
+    const keys = Object.keys(params).filter(k => k !== 'sign').sort();
+
+    // 2. 拼接字符串A (key1=value1&key2=value2...)
+    const stringA = keys.map(key => {
+      let val = params[key];
+      // 规则：第二层及以后的不排序，直接序列化
+      if (val !== null && typeof val === 'object') {
+        val = JSON.stringify(val);
+      }
+      // 规则：如果参数的值为空，不填值 (如 monkey1=)
+      if (val === null || val === undefined) {
+        val = '';
+      }
+      return `${key}=${val}`;
+    }).join('&');
+
+    // 3. 在 stringA 前面拼接上回调的 url 地址得到 stringSignTemp
+    const stringSignTemp = callbackUrl + stringA;
+
+    // 4. 进行 MD5 运算得到 sign 值
+    const calculatedSign = crypto.createHash('md5').update(stringSignTemp).digest('hex');
+
     return calculatedSign.toLowerCase() === sign.toLowerCase();
   }
 
@@ -242,11 +265,11 @@ class YundingV3Service extends Service {
     while (pageCount < MAX_PAGES) {
       pageCount++;
       this.logger.info(`[Yunding] Fetching homes for org ${orgId}, page ${pageCount}, offset ${offset}...`);
-      
-      const res = await this._searchHomeInfoPage(orgId, { 
-        ...baseQuery, 
-        offset, 
-        count 
+
+      const res = await this._searchHomeInfoPage(orgId, {
+        ...baseQuery,
+        offset,
+        count
       });
 
       if (res.ErrNo !== 0) {
@@ -256,7 +279,7 @@ class YundingV3Service extends Service {
       const homes = (res.home_list || []).map(home => {
         // 兼容处理设备列表字段名
         const rawDevices = home.devices || home.device_list || [];
-        
+
         if (home.rooms && Array.isArray(home.rooms)) {
           home.rooms = home.rooms.map(r => {
             // 将属于该房间的设备过滤并存入
@@ -270,7 +293,7 @@ class YundingV3Service extends Service {
         }
         return home;
       });
-      
+
       allHomes = allHomes.concat(homes);
 
       this.logger.info(`[Yunding] Page ${pageCount} fetched ${homes.length} homes.`);
@@ -284,7 +307,7 @@ class YundingV3Service extends Service {
     }
 
     this.logger.info(`[Yunding] Total homes fetched for org ${orgId}: ${allHomes.length}`);
-    
+
     // 直接返回处理后的全量房源数组
     return allHomes;
   }
@@ -302,73 +325,58 @@ class YundingV3Service extends Service {
 
   /**
    * [业务逻辑] 全量同步云丁资产 (项目/房间/设备)
+   * 适配分散式开发场景：一个本地项目可以包含云丁不同 home_id 的房间
    * @param {number} orgId - 机构ID
    */
   async syncAssets(orgId) {
     const { ctx } = this;
     const { Project, Room, Device } = ctx.model;
 
-    // 1. 获取云丁全量房源数据 (已处理翻页)
+    // 1. 获取云丁全量房源数据 (每个 yHome 是云丁的一套“房源”)
     const homeList = await this.searchHomeInfo(orgId);
-    this.logger.info(`[Sync] Starting asset sync for org ${orgId}. Total homes from Yunding: ${homeList.length}`);
+    this.logger.info(`[Sync] Starting decentralized asset sync for org ${orgId}. Total homes from Yunding: ${homeList.length}`);
 
     let stats = { projects: 0, rooms: 0, devices: 0 };
 
     for (const yHome of homeList) {
-      // 2. 同步项目 (Project)
-      let project = await Project.findOne({ 
-        where: { org_id: orgId, yunding_id: yHome.home_id } 
-      });
+      this.logger.info(`[Sync] Processing Yunding Home: ${yHome.home_name} (${yHome.home_id})`);
       
+      // 2. 寻找匹配的本地项目 (Project)
+      let project = await Project.findOne({ 
+        where: { org_id: orgId, name: yHome.home_name } 
+      });
+
       if (!project) {
-        // 尝试按名称匹配
-        project = await Project.findOne({ 
-          where: { org_id: orgId, name: yHome.home_name } 
-        });
+        project = await Project.findOne({ where: { org_id: orgId, name: '云丁同步待归类' } });
+        if (!project) {
+          project = await Project.create({
+            org_id: orgId,
+            name: '云丁同步待归类',
+            description: '自动同步产生的待归类项目',
+          });
+          stats.projects++;
+        }
       }
 
-      if (project) {
-        await project.update({ yunding_id: yHome.home_id });
-      } else {
-        project = await Project.create({
-          org_id: orgId,
-          name: yHome.home_name,
-          address: yHome.location || yHome.address,
-          yunding_id: yHome.home_id,
-        });
-      }
-      stats.projects++;
-
-      // 3. 同步房间 (Room)
       const yRooms = yHome.rooms || [];
       const yDevices = yHome.devices || yHome.device_list || [];
 
       for (const yRoom of yRooms) {
+        // 3. 同步房间 (Room) - 保持纯净，不再存储 yunding_id
         let room = await Room.findOne({
-          where: { org_id: orgId, project_id: project.id, yunding_id: yRoom.room_id }
+          where: { org_id: orgId, project_id: project.id, room_number: yRoom.room_name }
         });
 
         if (!room) {
-          // 尝试按房号匹配
-          room = await Room.findOne({
-            where: { org_id: orgId, project_id: project.id, room_number: yRoom.room_name }
-          });
-        }
-
-        if (room) {
-          await room.update({ yunding_id: yRoom.room_id });
-        } else {
           room = await Room.create({
             org_id: orgId,
             project_id: project.id,
             room_number: yRoom.room_name,
-            yunding_id: yRoom.room_id,
           });
         }
         stats.rooms++;
 
         // 4. 同步该房间下的设备 (Device)
-        // 注意：有些设备可能不属于具体房间 (公共设备)，这里我们处理属于该房间的设备
         const roomYDevices = yDevices.filter(d => d.room_id === yRoom.room_id);
         
         for (const yDev of roomYDevices) {
@@ -404,6 +412,14 @@ class YundingV3Service extends Service {
 
     this.logger.info(`[Sync] Finished. Stats: ${JSON.stringify(stats)}`);
     return stats;
+  }
+
+  /**
+   * [V2] 获取电表充值记录
+   * @param {Object} query - { home_id, room_id, uuid, start_time, end_time, offset, count }
+   */
+  async getRechargeRecord(orgId, query = {}) {
+    return await this.requestByOrg(orgId, 'GET', '/v2/elemeter_get_recharge_record', query);
   }
 
   /**

@@ -6,17 +6,17 @@
  */
 module.exports = app => {
   const { router, controller, middleware } = app;
-  
+
   // 核心中间件
-  const auth = middleware.jwtAuth();      
-  const tenant = middleware.tenantContext(); 
-  const permission = middleware.permission;  
-  
+  const auth = middleware.jwtAuth();
+  const tenant = middleware.tenantContext();
+  const permission = middleware.permission;
+
   const admin = controller.admin;
 
   // --- 1. 鉴权与身份 (Auth) ---
   router.post('/api/v1/auth/login', admin.auth.login);
-  router.post('/api/v1/auth/info', auth, tenant, admin.auth.info); 
+  router.post('/api/v1/auth/info', auth, tenant, admin.auth.info);
 
   // --- 2. 员工账号管理 (Staffs) ---
   router.post('/api/v1/staffs/list', auth, tenant, admin.staff.index);
@@ -25,9 +25,9 @@ module.exports = app => {
   router.post('/api/v1/staffs/set_permissions', auth, tenant, admin.staff.setPermissions);
 
   // --- 3. 房源资产 (Rooms) ---
-  router.post('/api/v1/rooms/list', auth, tenant, admin.room.index); 
+  router.post('/api/v1/rooms/list', auth, tenant, admin.room.index);
   router.post('/api/v1/rooms/create', auth, tenant, permission('ROOM_EDIT'), admin.room.create);
-  router.post('/api/v1/rooms/detail', auth, tenant, admin.room.show); 
+  router.post('/api/v1/rooms/detail', auth, tenant, admin.room.show);
   router.post('/api/v1/rooms/update', auth, tenant, permission('ROOM_EDIT'), admin.room.update);
   router.post('/api/v1/rooms/delete', auth, tenant, permission('ROOM_EDIT'), admin.room.destroy);
 
@@ -61,15 +61,17 @@ module.exports = app => {
   router.post('/api/v1/admin/dashboard', auth, tenant, admin.ops.getDashboard);
   router.post('/api/v1/ops/projects/report', auth, tenant, admin.ops.getProjectReport);
   router.post('/api/v1/ops/readings', auth, tenant, permission('ROOM_EDIT'), admin.ops.recordReading);
-  
+
   // --- 7.1 云丁物联配置 (Yunding Config) ---
-  router.post('/api/v1/yunding/merchant-config', auth, tenant, controller.admin.yunding.saveMerchantConfig);
-  router.post('/api/v1/yunding/device-info', auth, tenant, controller.admin.yunding.getDeviceInfo);
-  router.post('/api/v1/yunding/meter-info', auth, tenant, controller.admin.yunding.getMeterInfo);
-  router.post('/api/v1/yunding/meter-overdraft', auth, tenant, controller.admin.yunding.updateMeterOverdraft);
-  router.post('/api/v1/yunding/meter-reset', auth, tenant, controller.admin.yunding.resetMeterCharge);
-  router.post('/api/v1/yunding/all-homes', auth, tenant, controller.admin.yunding.getAllDevices);
-  router.post('/api/v1/yunding/sync', auth, tenant, controller.admin.yunding.syncAssets);
+  router.post('/api/v1/yunding/merchant-config', auth, tenant, controller.admin.yunding.saveMerchantConfig); // 保存商户自研模式密钥
+  router.post('/api/v1/yunding/device-info', auth, tenant, controller.admin.yunding.getDeviceInfo); // 获取设备基础信息
+  router.post('/api/v1/yunding/meter-info', auth, tenant, controller.admin.yunding.getMeterInfo); // 获取电表详细信息
+  router.post('/api/v1/yunding/meter-overdraft', auth, tenant, controller.admin.yunding.updateMeterOverdraft); // 设置电表透支额度
+  router.post('/api/v1/yunding/meter-reset', auth, tenant, controller.admin.yunding.resetMeterCharge); // 电表剩余电量清零
+  router.post('/api/v1/yunding/meter-consumption', auth, tenant, controller.admin.yunding.getMeterConsumption); // 获取电表用电增量记录
+  router.post('/api/v1/yunding/meter-recharge-records', auth, tenant, controller.admin.yunding.getRechargeRecords); // 获取电表充值历史记录
+  router.post('/api/v1/yunding/all-homes', auth, tenant, controller.admin.yunding.getAllDevices); // 获取云丁全量房源和设备列表
+  router.post('/api/v1/yunding/sync', auth, tenant, controller.admin.yunding.syncAssets); // 一键同步云丁资产到本地数据库
 
   // --- 8. 租客管理 (Tenants) [NEW] ---
   router.post('/api/v1/tenants/list', auth, tenant, admin.tenant.index);

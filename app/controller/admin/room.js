@@ -18,6 +18,7 @@ class RoomController extends Controller {
       roomNumber: body.roomNumber,
       projectId: body.projectId,
       status: body.status,
+      filterType: body.filterType, // 新增：逾期、到期等筛选
     };
 
     const result = await service.admin.room.list(params);
