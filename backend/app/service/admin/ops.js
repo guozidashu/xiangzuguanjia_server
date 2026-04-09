@@ -62,13 +62,20 @@ class OpsService extends Service {
           const price = device.device_type === 1 ? version.electric_price : version.water_price;
           const amount = (consumption * price).toFixed(2);
 
+          // 获取科目映射 (3电, 4水)
+          const target_type = device.device_type === 1 ? 3 : 4;
+          const feeItem = await ctx.model.OrgFeeItem.findOne({
+            where: { org_id, bill_type_map: target_type, status: 1 },
+            transaction: t,
+          });
+
           // 自动创建账单
           const bill = await ctx.model.Bill.create({
             org_id,
             lease_id,
             tenant_id: lease.tenant_id,
             room_id,
-            bill_type: device.device_type === 1 ? 3 : 4, // 3电, 4水
+            fee_item_id: feeItem ? feeItem.id : null,
             bill_period: '抄表出账',
             amount_due: amount,
             status: 0,

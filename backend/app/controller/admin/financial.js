@@ -49,7 +49,7 @@ class FinancialController extends Controller {
     const rules = {
       lease_id: 'number',
       room_id: 'number',
-      bill_type: 'number',
+      fee_item_id: 'number', // 切换到科目ID
       amount_due: 'number',
       due_date: 'string',
     };
@@ -116,7 +116,7 @@ class FinancialController extends Controller {
       lease_id: body.lease_id,
       room_id: body.room_id,
       status: body.status,
-      bill_type: body.bill_type,
+      fee_item_id: body.fee_item_id, // 切换到科目ID
     };
 
     const result = await service.admin.financial.list(params);

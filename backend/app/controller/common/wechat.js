@@ -14,86 +14,120 @@ class WechatController extends Controller {
       const data = await service.common.wechatPay.handleNotify(headers, body);
       logger.info('Decrypted WeChat Pay Data:', data);
 
-      // data 结构参考微信 V3 报文: { out_trade_no, transaction_id, trade_state, ... }
+      // data 结构参考微信 V3 报文: { out_trade_no, transaction_id, trade_state, amount: { total, payer_total, currency, payer_currency } }
       if (data.trade_state === 'SUCCESS') {
         const out_trade_no = data.out_trade_no;
         const transaction_id = data.transaction_id;
+        const total_amount = data.amount.total / 100; // 微信是分，转换成元
 
-        // 从 out_trade_no 解析出账单 ID (格式: TRADE_timestamp_bill_id)
-        const parts = out_trade_no.split('_');
-        const bill_id = parts[parts.length - 1];
+        // 2. 查找持久化订单及明细
+        const order = await ctx.model.PaymentOrder.findOne({
+          where: { pay_order_no: out_trade_no },
+          include: [{ model: ctx.model.PaymentOrderItem, as: 'items' }]
+        });
 
-        // 2. 执行账单核销逻辑 (开启事务)
+        if (!order) {
+          logger.warn(`WeChat Pay Notify: Order ${out_trade_no} not found in DB!`);
+          return;
+        }
+
+        if (order.status !== 0) {
+          logger.info(`WeChat Pay Notify: Order ${out_trade_no} already processed (Status: ${order.status}).`);
+          return;
+        }
+
+        // 3. 执行业务结算与对账 (启动事务)
         await ctx.model.transaction(async t => {
-          const bill = await ctx.model.Bill.findByPk(bill_id, { transaction: t });
-          if (!bill || bill.status === 2) return; // 已处理或不存在
-
-          // 更新账单状态
-          await bill.update({
-            amount_paid: bill.amount_due,
-            status: 2, // 已结清
-            paid_time: new Date(),
+          // A. 更新订单主表状态
+          await order.update({
+            status: 1, // 已支付
+            transaction_id: transaction_id,
+            pay_time: new Date(),
           }, { transaction: t });
 
-          // 记录流水
-          await ctx.model.PaymentRecord.create({
-            org_id: bill.org_id,
-            trade_type: 1, // 进账
-            amount: bill.amount_due,
-            net_amount: bill.amount_due, // 暂不扣除费率，分账单独算
-            trade_no: transaction_id,
-            trade_time: new Date(),
-            remark: `微信线上支付-单号:${out_trade_no}`,
-          }, { transaction: t });
-
-          // 3. 检查是否需要触发分账
-          // 查找对应的收款账户
-          const paymentAccount = await ctx.model.PaymentAccount.findOne({
-            where: { org_id: bill.org_id, account_type: 1, provider: 1 },
+          // B. 寻找关联账户并锁定 (用于更新余额)
+          const account = await ctx.model.PaymentAccount.findByPk(order.payment_account_id, { 
             transaction: t,
+            lock: true // 悲观锁防并发
           });
 
-          // 提取实付金额 (元)
-          const actualPaidYuan = data.amount.total / 100;
+          // C. 创建流水记录 (Audit Trail)
+          const record = await ctx.model.PaymentRecord.create({
+            org_id: order.org_id,
+            trade_type: 1, // 进账
+            payment_account_id: order.payment_account_id,
+            amount: order.amount,
+            net_amount: order.amount, // 初始不计费率
+            trade_no: transaction_id,
+            trade_time: new Date(),
+            remark: `微信线上合并支付-单号:${out_trade_no}`,
+          }, { transaction: t });
 
-          // [业务逻辑] 满足以下条件才触发分账：1. 账户开启分账; 2. 支付金额 >= 10元
-          if (paymentAccount && paymentAccount.is_profit_sharing === 1 && actualPaidYuan >= 10) {
-            // 计算平台抽成金额
-            let shareAmount = bill.amount_due * paymentAccount.sharing_ratio;
+          // D. 遍历订单明细，逐一结算业务
+          for (const item of order.items) {
+            // 目前仅处理账单 (related_type = 1)
+            if (item.related_type === 1 && item.bill_id) {
+              const bill = await ctx.model.Bill.findByPk(item.bill_id, { transaction: t });
+              if (bill && bill.status !== 2) {
+                // 更新账单已付金额和状态
+                await bill.update({
+                  amount_paid: item.amount,
+                  status: 2, // 已清
+                  paid_time: new Date(),
+                }, { transaction: t });
 
-            // [重要补丁] 如果计算出的分账金额超过了实付金额，则以实付金额为准
-            if (shareAmount > actualPaidYuan) {
-              shareAmount = actualPaidYuan;
+                // 建立流水与账单的核销关联
+                await ctx.model.PaymentBillMap.create({
+                  org_id: order.org_id,
+                  payment_record_id: record.id,
+                  bill_id: bill.id,
+                  amount_applied: item.amount,
+                }, { transaction: t });
+
+                // [特殊逻辑] 如果是押金账单，同步更新押金本
+                const feeItem = await ctx.model.OrgFeeItem.findByPk(bill.fee_item_id, { transaction: t });
+                if (feeItem && feeItem.bill_type_map === 2) {
+                  await ctx.model.LeaseDeposit.update(
+                    { amount_paid: bill.amount_due, status: 1 },
+                    { where: { lease_id: bill.lease_id, org_id: order.org_id }, transaction: t }
+                  );
+                }
+              }
             }
+          }
+
+          // E. 同步账户余额 (Ledger Sync)
+          if (account) {
+            const new_balance = parseFloat(account.balance) + parseFloat(order.amount);
+            await account.update({ balance: new_balance }, { transaction: t });
+          }
+
+          // F. 检查并执行平台分账逻辑
+          if (account && account.is_profit_sharing === 1 && total_amount >= 10) {
+            let shareAmount = order.amount * account.sharing_ratio;
+            if (shareAmount > total_amount) shareAmount = total_amount;
 
             if (shareAmount > 0) {
-              // 发起异步分账指令 (或者记录到待分账队列)
-              // 这里简化为直接调用 Service
               try {
-                await service.common.wechatPay.startProfitSharing({
-                  sub_mchid: paymentAccount.api_config.sub_mch_id,
-                  transaction_id: transactionId,
-                  total_amount: bill.amount_due, // 补全总金额，用于测试单比例计算
-                  out_order_no: `SHARING_${Date.now()}_${bill.id}`,
+                await ctx.service.common.wechatPay.startProfitSharing({
+                  sub_mchid: account.api_config.sub_mch_id,
+                  transaction_id: transaction_id,
+                  total_amount: order.amount,
+                  out_order_no: `SHARING_${Date.now()}_${order.id}`,
                   receivers: [
                     {
                       type: 'MERCHANT_ID',
-                      account: this.config.wechatPay.sp_mchid, // 分给服务商自己（平台）
+                      account: this.config.wechatPay.sp_mchid,
                       amount: shareAmount,
-                      description: `平台服务费-${bill.id}`,
+                      description: `平台服务费-订单:${order.pay_order_no}`,
                     }
                   ]
                 });
-                logger.info(`Profit sharing initiated for bill ${bill.id}, amount: ${shareAmount}`);
+                logger.info(`Combined Profit sharing initiated for Order ${order.id}, amount: ${shareAmount}`);
               } catch (sharingError) {
-                logger.error('Profit sharing error:', sharingError);
-                // 分账错误通常不应导致支付流程回滚，可后续补偿
+                logger.error('Combined Profit sharing Error:', sharingError);
               }
-            } else {
-              logger.info(`Profit sharing total_amount is 0, skipped.`);
             }
-          } else {
-            logger.info(`Profit sharing skipped: Account sharing disabled or amount below 10.00 threshold (Actual: ${actualPaidYuan}).`);
           }
         });
       }

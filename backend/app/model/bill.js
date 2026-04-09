@@ -9,7 +9,6 @@ module.exports = app => {
     lease_id: { type: INTEGER, allowNull: false, comment: '关联租约ID' },
     tenant_id: { type: INTEGER, allowNull: false, comment: '关联租客ID' },
     room_id: { type: INTEGER, allowNull: false, comment: '关联房间ID' },
-    bill_type: { type: TINYINT, allowNull: false, comment: '1租金, 2押金, 3电费, 4水费, 5物业, 6杂费' },
     parent_bill_id: { type: INTEGER, comment: '父账单ID' },
     batch_no: { type: STRING(50), comment: '批次号' },
     bill_period: { type: STRING(50), comment: '账单期(2024-04)' },

@@ -38,7 +38,6 @@ class FinancialService extends Service {
       lease_version_id: version.id,
       tenant_id: lease.tenant_id,
       room_id: version.room_id,
-      bill_type: 2, 
       fee_item_id: depositItem ? depositItem.id : null, // 接入科目体系
       bill_period: '签署押金',
       amount_due: version.deposit_amount || version.rent_price,
@@ -53,7 +52,6 @@ class FinancialService extends Service {
       lease_version_id: version.id,
       tenant_id: lease.tenant_id,
       room_id: version.room_id,
-      bill_type: 1,
       fee_item_id: rentItem ? rentItem.id : null, // 接入科目体系
       bill_period: dayjs(version.start_date).format('YYYY-MM'),
       amount_due: version.rent_price,
@@ -122,8 +120,9 @@ class FinancialService extends Service {
             paid_time: record.trade_time,
           }, { transaction: t });
 
-          // 如果是押金账单，同步更新押金本状态
-          if (bill.bill_type === 2) {
+          // 如果是押金账单，同步更新押金本状态 (通过科目映射判断)
+          const feeItem = await ctx.model.OrgFeeItem.findByPk(bill.fee_item_id, { transaction: t });
+          if (feeItem && feeItem.bill_type_map === 2) {
             await ctx.model.LeaseDeposit.update(
               { amount_paid: bill.amount_due, status: 1 },
               { where: { lease_id: bill.lease_id, org_id }, transaction: t }
@@ -246,7 +245,7 @@ class FinancialService extends Service {
           lease_id: original_bill.lease_id,
           tenant_id: original_bill.tenant_id,
           room_id: original_bill.room_id,
-          bill_type: original_bill.bill_type,
+          fee_item_id: original_bill.fee_item_id, // 继承原账单科目
           bill_period: `${original_bill.bill_period}(拆)`,
           amount_due: part.amount,
           due_date: part.due_date || original_bill.due_date,
@@ -262,16 +261,16 @@ class FinancialService extends Service {
 
   /**
    * 账单列表 (Admin)
-   * @param {Object} params - { page, page_size, status, bill_type, tenant_id, room_id }
+   * @param {Object} params - { page, page_size, status, fee_item_id, tenant_id, room_id }
    */
   async list(params) {
     const { ctx } = this;
     const { org_id } = ctx;
-    const { page = 1, page_size = 10, status, bill_type, tenant_id, room_id } = params;
+    const { page = 1, page_size = 10, status, fee_item_id, tenant_id, room_id } = params;
 
     const where = { org_id };
     if (status !== undefined) where.status = status;
-    if (bill_type !== undefined) where.bill_type = bill_type;
+    if (fee_item_id !== undefined) where.fee_item_id = fee_item_id;
     if (tenant_id) where.tenant_id = tenant_id;
     if (room_id) where.room_id = room_id;
 
@@ -282,6 +281,7 @@ class FinancialService extends Service {
       include: [
         { model: ctx.model.Tenant, as: 'tenant', attributes: ['name', 'phone'] },
         { model: ctx.model.Room, as: 'room', include: [{ model: ctx.model.Project, as: 'project' }] },
+        { model: ctx.model.OrgFeeItem, as: 'fee_item', attributes: ['name'] }, // 包含科目名称
       ],
       order: [['due_date', 'ASC'], ['created_at', 'DESC']],
     });
