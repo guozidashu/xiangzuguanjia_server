@@ -137,7 +137,6 @@ class LeaseService extends Service {
       // 3. 更新租约主表
       await lease.update({
         current_version_id: version.id,
-        end_date: version.end_date,
         status: 1, // 确保状态为生效中
       }, { transaction: t });
 
@@ -358,7 +357,6 @@ class LeaseService extends Service {
 
       await lease.update({
         status: 3,
-        checkout_date: actual_end_date,
         current_version_id: term_version.id,
       }, { transaction: t });
 
@@ -400,24 +398,25 @@ class LeaseService extends Service {
     const { Op } = app.Sequelize;
 
     const where = { org_id };
+    const version_where = {};
 
     // 权限与项目隔离：强制使用 ctx.project_id (若存在) 或入参 project_id
     const effective_project_id = ctx.project_id || project_id;
 
     if (status !== undefined && status !== '') where.status = status;
 
-    // 处理快捷筛选 (filter)
+    // 处理快捷筛选 (filter)，现在需要通过关联版本过滤
     const now = new Date();
     const dayjs = require('dayjs');
     if (filter === 'this_month') {
-      where.status = 2; // 仅看生效中
-      where.end_date = { [Op.between]: [dayjs().startOf('month').toDate(), dayjs().endOf('month').toDate()] };
+      where.status = 1; // 仅看生效中
+      version_where.end_date = { [Op.between]: [dayjs().startOf('month').toDate(), dayjs().endOf('month').toDate()] };
     } else if (filter === '30_days') {
-      where.status = 2;
-      where.end_date = { [Op.between]: [now, dayjs().add(30, 'day').toDate()] };
+      where.status = 1;
+      version_where.end_date = { [Op.between]: [now, dayjs().add(30, 'day').toDate()] };
     } else if (filter === '15_days') {
-      where.status = 2;
-      where.end_date = { [Op.between]: [now, dayjs().add(15, 'day').toDate()] };
+      where.status = 1;
+      version_where.end_date = { [Op.between]: [now, dayjs().add(15, 'day').toDate()] };
     }
 
     const tenant_where = {};
@@ -427,9 +426,14 @@ class LeaseService extends Service {
     const room_where = {};
     if (effective_project_id) room_where.project_id = effective_project_id;
 
-    // 1. 统计各状态数量 (用于前端 Tab 计数)
+    // 1. 统计各状态数量 (需要 Join current_version 如果有 filter)
     const stats_rows = await ctx.model.Lease.findAll({
-      where: { org_id },
+      where: { 
+        ...where,
+        ...(Object.keys(version_where).length > 0 ? {
+          '$current_version.end_date$': version_where.end_date
+        } : {})
+      },
       attributes: [
         [app.Sequelize.col('leases.status'), 'status'],
         [app.Sequelize.fn('COUNT', app.Sequelize.col('leases.id')), 'count']
@@ -441,13 +445,14 @@ class LeaseService extends Service {
           where: effective_project_id ? { project_id: effective_project_id } : undefined,
           attributes: [],
           required: !!effective_project_id
-        }
+        },
+        { model: ctx.model.LeaseVersion, as: 'current_version', attributes: [], required: Object.keys(version_where).length > 0 }
       ],
       group: [app.Sequelize.col('leases.status')],
-      raw: true, // 使用 raw: true 简化聚合结果获取
+      raw: true,
     });
 
-    const statistics = { total: 0, pending: 0, active: 0, expired: 0, terminated: 0, renewed: 0, adjusted: 0 };
+    const statistics = { total: 0, pending: 0, active: 0, expired: 0, terminated: 0 };
     stats_rows.forEach(r => {
       const s = parseInt(r.status);
       const c = parseInt(r.count);
@@ -456,32 +461,26 @@ class LeaseService extends Service {
       else if (s === 1) statistics.active = c;
       else if (s === 2) statistics.expired = c;
       else if (s === 3) statistics.terminated = c;
-      else if (s === 4) statistics.renewed = c;
-      else if (s === 5) statistics.adjusted = c;
     });
 
-    // 2. 获取分页列表
+    // 2. 执行分页列表查询
     const { rows, count } = await ctx.model.Lease.findAndCountAll({
-      where,
-      offset: (page - 1) * page_size,
+      where: {
+        ...where,
+        ...(Object.keys(version_where).length > 0 ? {
+          '$current_version.end_date$': version_where.end_date
+        } : {})
+      },
       limit: parseInt(page_size),
+      offset: (parseInt(page) - 1) * parseInt(page_size),
       include: [
-        {
-          model: ctx.model.Tenant,
-          as: 'tenant',
-          where: Object.keys(tenant_where).length > 0 ? tenant_where : undefined,
-          required: Object.keys(tenant_where).length > 0
-        },
-        {
-          model: ctx.model.Room,
-          as: 'room',
-          where: Object.keys(room_where).length > 0 ? room_where : undefined,
-          required: Object.keys(room_where).length > 0,
-          include: [{ model: ctx.model.Project, as: 'project' }]
-        },
+        { model: ctx.model.Tenant, as: 'tenant', where: Object.keys(tenant_where).length > 0 ? tenant_where : undefined, required: !!(tenant_name || phone) },
+        { model: ctx.model.Room, as: 'room', where: Object.keys(room_where).length > 0 ? room_where : undefined, include: [{ model: ctx.model.Project, as: 'project' }] },
+        { model: ctx.model.LeaseVersion, as: 'current_version', required: true },
         { model: ctx.model.OrgStaff, as: 'manager', attributes: ['name'] },
       ],
       order: [[app.Sequelize.col('leases.created_at'), 'DESC']],
+      distinct: true,
     });
 
     // 3. 构建逾期标识 (注入财务预警字段)

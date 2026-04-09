@@ -14,6 +14,8 @@ module.exports = app => {
     fee_payer: { type: TINYINT, defaultValue: 1, comment: '承担方' },
     is_profit_sharing: { type: TINYINT, defaultValue: 0, comment: '是否启用分账' },
     sharing_ratio: { type: DECIMAL(5, 4), defaultValue: 0.0015, comment: '平台分润比例' },
+    balance: { type: DECIMAL(12, 2), defaultValue: 0.00, comment: '可用余额' },
+    frozen_balance: { type: DECIMAL(12, 2), defaultValue: 0.00, comment: '冻结余额' },
     status: { type: TINYINT, defaultValue: 1, comment: '1启用, 0停用' },
     created_at: { type: DATE, defaultValue: app.Sequelize.literal('CURRENT_TIMESTAMP') },
     updated_at: { type: DATE, defaultValue: app.Sequelize.literal('CURRENT_TIMESTAMP') },

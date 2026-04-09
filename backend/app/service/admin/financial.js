@@ -12,7 +12,16 @@ class FinancialService extends Service {
   async createLeaseInitialLedger(lease, version, t) {
     const { ctx } = this;
 
-    // 1. 生成押金记录 (押金本)
+    // 1. 获取该机构的科目映射
+    const feeItems = await ctx.model.OrgFeeItem.findAll({
+      where: { org_id: lease.org_id, status: 1 }
+    });
+    
+    const findItem = (type) => feeItems.find(i => i.bill_type_map === type);
+    const depositItem = findItem(2);
+    const rentItem = findItem(1);
+
+    // 2. 生成押金记录 (押金本)
     await ctx.model.LeaseDeposit.create({
       org_id: lease.org_id,
       lease_id: lease.id,
@@ -22,28 +31,30 @@ class FinancialService extends Service {
       status: 0,
     }, { transaction: t });
 
-    // 2. 生成对应的押金账单 (待支付账单)
+    // 3. 生成对应的押金账单 (待支付账单)
     await ctx.model.Bill.create({
       org_id: lease.org_id,
       lease_id: lease.id,
       lease_version_id: version.id,
       tenant_id: lease.tenant_id,
       room_id: version.room_id,
-      bill_type: 2, // 押金科目
+      bill_type: 2, 
+      fee_item_id: depositItem ? depositItem.id : null, // 接入科目体系
       bill_period: '签署押金',
       amount_due: version.deposit_amount || version.rent_price,
       due_date: version.start_date,
       status: 0,
     }, { transaction: t });
 
-    // 3. 生成首期租金账单
+    // 4. 生成首期租金账单
     await ctx.model.Bill.create({
       org_id: lease.org_id,
       lease_id: lease.id,
       lease_version_id: version.id,
       tenant_id: lease.tenant_id,
       room_id: version.room_id,
-      bill_type: 1, // 租金科目
+      bill_type: 1,
+      fee_item_id: rentItem ? rentItem.id : null, // 接入科目体系
       bill_period: dayjs(version.start_date).format('YYYY-MM'),
       amount_due: version.rent_price,
       due_date: version.start_date,
@@ -80,14 +91,13 @@ class FinancialService extends Service {
         amount,
         handling_fee: fee,
         net_amount,
-        related_bill_ids: bill_ids.join(','),
-        trade_no: `OFFLINE_${dayjs().valueOf()}`,
+        trade_no: `OFFLINE_${Date.now()}`,
         trade_time: trade_time || new Date(),
         operator_id: ctx.state.user.uid,
         remark,
       }, { transaction: t });
 
-      // 3. 逐个核销账单 (简易全额核销逻辑)
+      // 3. 逐个核销账单并建立关联 (Mapping)
       for (const bill_id of bill_ids) {
         const bill = await ctx.model.Bill.findOne({
           where: { id: bill_id, org_id },
@@ -95,8 +105,19 @@ class FinancialService extends Service {
         });
 
         if (bill && bill.status !== 2) {
+          const amount_to_apply = bill.amount_due; // 当前简化为全额核销
+          
+          // 创建关联记录
+          await ctx.model.PaymentBillMap.create({
+            org_id,
+            payment_record_id: record.id,
+            bill_id: bill.id,
+            amount_applied: amount_to_apply,
+          }, { transaction: t });
+
+          // 更新账单状态
           await bill.update({
-            amount_paid: bill.amount_due,
+            amount_paid: amount_to_apply,
             status: 2, // 已结清
             paid_time: record.trade_time,
           }, { transaction: t });
@@ -111,6 +132,13 @@ class FinancialService extends Service {
         }
       }
 
+      // 4. 同步更新账户余额 (SaaS Ledger 核心：交易时实时同步余额)
+      // 进账：余额 = 旧余额 + 本次净收益 (金额 - 手续费)
+      const new_balance = parseFloat(account.balance) + parseFloat(net_amount);
+      await account.update({
+        balance: new_balance
+      }, { transaction: t });
+
       return record;
     });
   }
@@ -120,8 +148,8 @@ class FinancialService extends Service {
    */
   async getLeaseLedger(lease_id) {
     const { ctx } = this;
-    const [ bills, deposits ] = await Promise.all([
-      ctx.model.Bill.findAll({ 
+    const [bills, deposits] = await Promise.all([
+      ctx.model.Bill.findAll({
         where: { lease_id, org_id: ctx.org_id },
         include: [{ model: ctx.model.BillAdjustment, as: 'adjustments' }]
       }),
@@ -137,10 +165,22 @@ class FinancialService extends Service {
   async createManualBill(params) {
     const { ctx } = this;
     const { org_id } = ctx;
-    
+    const { bill_type, fee_item_id } = params;
+
+    let final_fee_item_id = fee_item_id;
+
+    // 如果未传科目ID但传了旧类型，则尝试寻找映射
+    if (!final_fee_item_id && bill_type) {
+      const item = await ctx.model.OrgFeeItem.findOne({
+        where: { org_id, bill_type_map: bill_type, status: 1 }
+      });
+      if (item) final_fee_item_id = item.id;
+    }
+
     return await ctx.model.Bill.create({
       ...params,
       org_id,
+      fee_item_id: final_fee_item_id,
       status: 0,
     });
   }
@@ -171,7 +211,7 @@ class FinancialService extends Service {
     });
 
     if (!bill) ctx.throw(404, '账单不存在');
-    
+
     return await bill.update({ due_date: new_date });
   }
 
@@ -240,10 +280,10 @@ class FinancialService extends Service {
       offset: (page - 1) * page_size,
       limit: parseInt(page_size),
       include: [
-        { model: ctx.model.Tenant, as: 'tenant', attributes: [ 'name', 'phone' ] },
+        { model: ctx.model.Tenant, as: 'tenant', attributes: ['name', 'phone'] },
         { model: ctx.model.Room, as: 'room', include: [{ model: ctx.model.Project, as: 'project' }] },
       ],
-      order: [[ 'due_date', 'ASC' ], [ 'created_at', 'DESC' ]],
+      order: [['due_date', 'ASC'], ['created_at', 'DESC']],
     });
 
     // 动态计算逾期状态
@@ -253,11 +293,11 @@ class FinancialService extends Service {
       return b;
     });
 
-    return { 
-      list, 
-      total: count, 
-      page: parseInt(page), 
-      page_size: parseInt(page_size) 
+    return {
+      list,
+      total: count,
+      page: parseInt(page),
+      page_size: parseInt(page_size)
     };
   }
 
@@ -275,18 +315,18 @@ class FinancialService extends Service {
 
     // 2. 统计每个账户的流水总额 (进账累加)
     const stats = await ctx.model.PaymentRecord.findAll({
-      where: { 
+      where: {
         org_id,
         trade_type: 1, // 仅统计进账
         payment_account_id: { [app.Sequelize.Op.ne]: null }
       },
       attributes: [
         'payment_account_id',
-        [ app.Sequelize.fn('SUM', app.Sequelize.col('amount')), 'total_amount' ],
-        [ app.Sequelize.fn('SUM', app.Sequelize.col('net_amount')), 'total_net_amount' ],
-        [ app.Sequelize.fn('COUNT', app.Sequelize.col('id')), 'trade_count' ]
+        [app.Sequelize.fn('SUM', app.Sequelize.col('amount')), 'total_amount'],
+        [app.Sequelize.fn('SUM', app.Sequelize.col('net_amount')), 'total_net_amount'],
+        [app.Sequelize.fn('COUNT', app.Sequelize.col('id')), 'trade_count']
       ],
-      group: [ 'payment_account_id' ],
+      group: ['payment_account_id'],
     });
 
     // 3. 组合数据
@@ -317,7 +357,7 @@ class FinancialService extends Service {
     const where = { org_id };
     if (payment_account_id) where.payment_account_id = payment_account_id;
     if (trade_type) where.trade_type = trade_type;
-    
+
     if (start_date || end_date) {
       where.trade_time = {};
       if (start_date) where.trade_time[Op.gte] = start_date;
@@ -329,17 +369,17 @@ class FinancialService extends Service {
       offset: (page - 1) * page_size,
       limit: parseInt(page_size),
       include: [
-        { model: ctx.model.PaymentAccount, as: 'account', attributes: [ 'account_name' ] },
-        { model: ctx.model.OrgStaff, as: 'operator', attributes: [ 'name' ] },
+        { model: ctx.model.PaymentAccount, as: 'account', attributes: ['account_name'] },
+        { model: ctx.model.OrgStaff, as: 'operator', attributes: ['name'] },
       ],
-      order: [[ 'trade_time', 'DESC' ], [ 'created_at', 'DESC' ]],
+      order: [['trade_time', 'DESC'], ['created_at', 'DESC']],
     });
 
-    return { 
-      list: rows, 
-      total: count, 
-      page: parseInt(page), 
-      page_size: parseInt(page_size) 
+    return {
+      list: rows,
+      total: count,
+      page: parseInt(page),
+      page_size: parseInt(page_size)
     };
   }
 
@@ -370,28 +410,28 @@ class FinancialService extends Service {
       offset: (page - 1) * page_size,
       limit: parseInt(page_size),
       include: [
-        { 
-          model: ctx.model.Tenant, 
-          as: 'tenant', 
+        {
+          model: ctx.model.Tenant,
+          as: 'tenant',
           where: Object.keys(tenant_where).length > 0 ? tenant_where : undefined,
-          attributes: [ 'name', 'phone' ] 
+          attributes: ['name', 'phone']
         },
-        { 
-          model: ctx.model.Lease, 
+        {
+          model: ctx.model.Lease,
           as: 'lease',
           include: [
-            { model: ctx.model.Room, as: 'room', attributes: [ 'room_number' ] }
+            { model: ctx.model.Room, as: 'room', attributes: ['room_number'] }
           ]
         },
       ],
-      order: [[ 'created_at', 'DESC' ]],
+      order: [['created_at', 'DESC']],
     });
 
-    return { 
-      list: rows, 
-      total: count, 
-      page: parseInt(page), 
-      page_size: parseInt(page_size) 
+    return {
+      list: rows,
+      total: count,
+      page: parseInt(page),
+      page_size: parseInt(page_size)
     };
   }
 
@@ -439,6 +479,8 @@ class FinancialService extends Service {
 
       return deposit;
     });
+  }
+
   /**
    * 申请账单金额微调 (Adjustment)
    * @param {Object} params - { bill_id, type, amount, remark }
@@ -447,7 +489,7 @@ class FinancialService extends Service {
   async applyAdjustment(params) {
     const { ctx } = this;
     const { org_id } = ctx;
-    const { bill_id, type, amount, remark } = params;
+    const { bill_id, type, amount, remark, payment_account_id } = params;
 
     return await ctx.model.transaction(async t => {
       const bill = await ctx.model.Bill.findOne({
@@ -468,6 +510,32 @@ class FinancialService extends Service {
         remark,
         operator_id: ctx.state.user.uid,
       }, { transaction: t });
+
+      // 2. 如果是退款 (type: 3)，且指定了支付账户，则扣减账户余额
+      if (type === 3 && payment_account_id) {
+        const account = await ctx.model.PaymentAccount.findOne({
+          where: { id: payment_account_id, org_id },
+          transaction: t,
+        });
+        if (account) {
+          const new_balance = parseFloat(account.balance) - parseFloat(amount);
+          await account.update({ balance: new_balance }, { transaction: t });
+
+          // 同时记录一笔出账流水 (PaymentRecord)
+          await ctx.model.PaymentRecord.create({
+            org_id,
+            trade_type: 2, // 出账
+            payment_account_id,
+            amount,
+            handling_fee: 0,
+            net_amount: amount,
+            trade_no: `REFUND_${Date.now()}`,
+            trade_time: new Date(),
+            operator_id: ctx.state.user.uid,
+            remark: `退款调整: ${remark || ''}`,
+          }, { transaction: t });
+        }
+      }
 
       return adjustment;
     });

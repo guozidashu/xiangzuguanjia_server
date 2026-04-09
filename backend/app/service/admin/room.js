@@ -54,30 +54,32 @@ class RoomService extends Service {
       });
       where.id = { [Op.in]: expiring_bills.map(b => b.room_id) };
     } else if (filter === 'lease_expiring') {
-      // 15天租期到期
+      // 15天租期到期 (需跨表查版本)
       const expiring_date = dayjs().add(15, 'day').toDate();
-      const expiring_leases = await ctx.model.Lease.findAll({
+      const expiring_rooms = await ctx.model.Lease.findAll({
         attributes: ['room_id'],
         where: {
           org_id: ctx.org_id,
           status: 1, // 生效中
-          end_date: { [Op.between]: [now, expiring_date] },
+          '$current_version.end_date$': { [Op.between]: [now, expiring_date] },
         },
+        include: [{ model: ctx.model.LeaseVersion, as: 'current_version', attributes: [] }],
         group: ['room_id'],
       });
-      where.id = { [Op.in]: expiring_leases.map(l => l.room_id) };
+      where.id = { [Op.in]: expiring_rooms.map(l => l.room_id) };
     } else if (filter === 'lease_expired') {
       // 租期已过期
-      const expired_leases = await ctx.model.Lease.findAll({
+      const expired_rooms = await ctx.model.Lease.findAll({
         attributes: ['room_id'],
         where: {
           org_id: ctx.org_id,
           status: 1,
-          end_date: { [Op.lt]: now },
+          '$current_version.end_date$': { [Op.lt]: now },
         },
+        include: [{ model: ctx.model.LeaseVersion, as: 'current_version', attributes: [] }],
         group: ['room_id'],
       });
-      where.id = { [Op.in]: expired_leases.map(l => l.room_id) };
+      where.id = { [Op.in]: expired_rooms.map(l => l.room_id) };
     }
 
     // A. 执行房源列表查询 (带关联)
@@ -92,7 +94,10 @@ class RoomService extends Service {
           as: 'current_lease',
           required: false,
           where: { status: 1 }, // 仅关联生效中租约
-          include: [{ model: ctx.model.Tenant, as: 'tenant', attributes: ['id', 'name', 'phone'] }]
+          include: [
+            { model: ctx.model.Tenant, as: 'tenant', attributes: ['name', 'phone'] },
+            { model: ctx.model.LeaseVersion, as: 'current_version' }
+          ]
         }
       ],
       order: [['created_at', 'DESC']],

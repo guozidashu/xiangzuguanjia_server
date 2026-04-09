@@ -52,12 +52,14 @@ class OpsService extends Service {
       if (lease_id && consumption > 0) {
         const lease = await ctx.model.Lease.findOne({
           where: { id: lease_id, org_id },
+          include: [{ model: ctx.model.LeaseVersion, as: 'current_version' }],
           transaction: t,
         });
 
-        if (lease) {
-          // 根据表类型选择单价
-          const price = device.device_type === 1 ? lease.electric_price : lease.water_price;
+        if (lease && lease.current_version) {
+          const version = lease.current_version;
+          // 根据表类型选择单价 (从版本获取)
+          const price = device.device_type === 1 ? version.electric_price : version.water_price;
           const amount = (consumption * price).toFixed(2);
 
           // 自动创建账单
@@ -92,29 +94,40 @@ class OpsService extends Service {
     const { Op } = app.Sequelize;
 
     // 1. 计算该项目下的房源总收入 (已结清的账单)
-    // 注意：这里包含了租金、水电、杂费的总和
     const total_revenue = await ctx.model.Bill.sum('amount_paid', {
       where: {
         org_id,
-        status: 2, // 仅计算已结清的真实进账
+        status: 2, // 仅计算已结清的真实实收
         room_id: {
           [Op.in]: app.Sequelize.literal(`(SELECT id FROM rooms WHERE project_id = ${project_id})`)
         }
       }
     }) || 0;
 
-    // 2. 计算该项目下的静态收房成本 (业主底租)
-    const landlord_cost = await ctx.model.LandlordContract.sum('rent_cost', {
-      where: { org_id, project_id, status: 1 }
-    }) || 0;
+    // 2. 从统一支出表 (OrgExpense) 计算总成本
+    const expenses = await ctx.model.OrgExpense.findAll({
+      where: { org_id, project_id, status: 1 },
+      attributes: [
+        'expense_type',
+        [app.Sequelize.fn('SUM', app.Sequelize.col('amount')), 'total_amount']
+      ],
+      group: ['expense_type'],
+      raw: true
+    });
 
-    // 3. 计算该项目下的外部运营支出 (物业费、维修费等)
-    const extra_expense = await ctx.model.OrgExternalExpense.sum('amount', {
-      where: { org_id, project_id, status: 1 }
-    }) || 0;
+    let landlord_cost = 0;
+    let extra_expense = 0;
 
-    // 4. 汇总净利润
-    const net_profit = (total_revenue - landlord_cost - extra_expense).toFixed(2);
+    expenses.forEach(e => {
+      const type = parseInt(e.expense_type);
+      const amt = parseFloat(e.total_amount);
+      if (type === 1) landlord_cost += amt; // 房东租金
+      else extra_expense += amt;            // 运营、维修、佣金等
+    });
+
+    // 3. 汇总净利润
+    const total_cost = landlord_cost + extra_expense;
+    const net_profit = (parseFloat(total_revenue) - total_cost).toFixed(2);
 
     return {
       project_id,
@@ -203,16 +216,17 @@ class OpsService extends Service {
     });
 
     // 3. 租约变动统计
-    // 30 天内即将到期的租约
+    // 30 天内即将到期的租约 (跨表查询版本)
     const expiring_soon_count = await ctx.model.Lease.count({
       where: {
         org_id,
         room_id: { [Op.in]: projectRoomIds },
-        status: 1,
-        end_date: {
+        status: 1, // 生效中
+        '$current_version.end_date$': {
           [Op.between]: [ today, dayjs().add(30, 'day').toDate() ]
         }
-      }
+      },
+      include: [{ model: ctx.model.LeaseVersion, as: 'current_version', attributes: [] }],
     });
 
     // 汇总指标

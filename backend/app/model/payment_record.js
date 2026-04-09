@@ -11,7 +11,6 @@ module.exports = app => {
     amount: { type: DECIMAL(10, 2), allowNull: false, comment: '交易额' },
     handling_fee: { type: DECIMAL(10, 2), defaultValue: 0.00, comment: '手续费' },
     net_amount: { type: DECIMAL(10, 2), allowNull: false, comment: '净额' },
-    related_bill_ids: { type: STRING(255), comment: '核销账单ID' },
     trade_no: { type: STRING(100), comment: '交易号' },
     trade_time: { type: DATE, allowNull: false, comment: '真实时间' },
     operator_id: { type: INTEGER, comment: '操作人' },
@@ -24,6 +23,14 @@ module.exports = app => {
 
   PaymentRecord.associate = function() {
     app.model.PaymentRecord.belongsTo(app.model.PaymentAccount, { foreignKey: 'payment_account_id', as: 'account' });
+    
+    // 多对多：关联核销账单
+    app.model.PaymentRecord.belongsToMany(app.model.Bill, {
+      through: app.model.PaymentBillMap,
+      foreignKey: 'payment_record_id',
+      otherKey: 'bill_id',
+      as: 'bills',
+    });
   };
 
   return PaymentRecord;

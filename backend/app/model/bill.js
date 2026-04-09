@@ -19,6 +19,7 @@ module.exports = app => {
     review_status: { type: TINYINT, defaultValue: 1, comment: '0待审, 1已审' },
     due_date: { type: DATE, comment: '最晚应缴日' },
     lease_version_id: { type: INTEGER, comment: '关联租约版本ID' },
+    fee_item_id: { type: INTEGER, comment: '关联费用科目ID' },
     paid_time: { type: DATE, comment: '结清时间' },
     remark: { type: STRING(255), comment: '备注' },
     created_at: { type: DATE, defaultValue: app.Sequelize.literal('CURRENT_TIMESTAMP') },
@@ -30,9 +31,18 @@ module.exports = app => {
   Bill.associate = function() {
     app.model.Bill.belongsTo(app.model.Lease, { foreignKey: 'lease_id', as: 'lease' });
     app.model.Bill.belongsTo(app.model.LeaseVersion, { foreignKey: 'lease_version_id', as: 'lease_version' });
+    app.model.Bill.belongsTo(app.model.OrgFeeItem, { foreignKey: 'fee_item_id', as: 'fee_item' });
     app.model.Bill.hasMany(app.model.BillAdjustment, { foreignKey: 'bill_id', as: 'adjustments' });
     app.model.Bill.belongsTo(app.model.Tenant, { foreignKey: 'tenant_id', as: 'tenant' });
     app.model.Bill.belongsTo(app.model.Room, { foreignKey: 'room_id', as: 'room' });
+    
+    // 多对多：关联支付记录
+    app.model.Bill.belongsToMany(app.model.PaymentRecord, {
+      through: app.model.PaymentBillMap,
+      foreignKey: 'bill_id',
+      otherKey: 'payment_record_id',
+      as: 'payments',
+    });
   };
 
   return Bill;
